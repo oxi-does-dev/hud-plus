@@ -1,4 +1,4 @@
-# HUD+ 3
+# HUD+ 4
 
 HUD+ is a native Horizon HUD mod: one bundle that replaces a pile of separate
 HUD mods and adds a drag-and-drop layout editor. Everything is configurable in
@@ -20,6 +20,27 @@ game; no files need editing by hand.
 | Tooltips | Food and saturation on food items; durability, max stack and the item id while sneaking |
 | Vanilla HUD | The game's own widgets — crosshair, hotbar, health and hunger, XP bar, effect icons, boss bars, item name, action bar, title, subtitles, scoreboard, chat, player list, mount health and the sleep overlay — each moved and scaled by HUD+ |
 
+## Views
+
+Every module has four views: **Minimal**, **Compact**, **Standard** and
+**Full**. `Standard` follows the module's own switches; the other three are
+presets, so one row under `N` makes a module tiny, tidy or exhaustive without
+touching a dozen options. A profile picks a view for all modules: Minimal
+gives every module its Minimal view, PvP gives Compact, and the rest give
+Standard.
+
+| Module | Minimal | Compact | Full |
+| --- | --- | --- | --- |
+| AppleSkin | outlines only | outlines and food numbers | saturation, numbers, exhaustion, regeneration and the item preview |
+| Effects | icons only, three rows | icons, names and time, six rows | names, amplifiers, ambient marks, every row, no limit |
+| Inventory | hotbar only | hotbar and grid with stack counts | grid, armour, offhand, empty slots, counts and durability |
+| Armour | icons only | icons and percentage | names, percentages, bars and the held item |
+| Coordinates | XYZ only | XYZ and facing | chunk, dimension, Nether equivalent, yaw and two decimals |
+| Keystrokes | WASD only | WASD and mouse | space, sneak, sprint, CPS and labels |
+| Performance & time | FPS only | FPS and world clock | frame time, 1% low, real time, speed and compass |
+| Player vitals | health only | health, food and bars | absorption, armour, air, XP and bars |
+| Held items | name only | name and count | offhand, arrows, totems, counts and durability |
+
 AppleSkin follows [squeek502/AppleSkin](https://github.com/squeek502/AppleSkin) (26.3):
 its four saturation outlines from `icons.png` (public domain) sit on the vanilla
 hunger bar, and holding food flashes the hunger and saturation it would restore.
@@ -27,9 +48,9 @@ Moving *Health & hunger* on the Vanilla page takes the overlay with the bar.
 
 
 All modules have an anchor (nine positions), an offset, a scale, a background
-and a border. Five profiles (Default, Minimal, PvP, Builder, Streamer) and six
-themes (Dark, Light, Transparent, Neon, High contrast, Amber) set everything at
-once.
+and a border, plus the four views above. Five profiles (Default, Minimal, PvP,
+Builder, Streamer) and six themes (Dark, Light, Transparent, Neon, High
+contrast, Amber) set everything at once.
 
 ## Using it
 
@@ -45,8 +66,9 @@ once.
   click to reset it, `Space` to switch its control on or off and `R` to reset
   every widget. The real HUD stays visible while you edit, so what you see is
   what the game draws.
-- `N` opens settings: a scrollable list of every option, with sections. Click a
-  row to change it; right-click goes back. The first row is the master switch,
+- `N` opens settings: a scrollable list of every option, with sections. Each
+  module starts with its `View` row, right under `Enabled`. Click a row to
+  change it; right-click goes back. The first row is the master switch,
   so the whole HUD can be turned off without leaving the world. Its `Vanilla
   HUD` section turns the widget control on or off and opens the vanilla page.
 - `/hudplus` shows the command help. `/hudplus on|off`, `layout`, `settings`,
@@ -82,6 +104,19 @@ timing a client sends, all untouched) and server-side anticheats that look at
 the same traffic. Some servers also restrict what a HUD may show by their rules
 — coordinates, for one. Every module has a switch under `N`, and the master
 switch on the first row turns the whole HUD off, without leaving the world.
+
+## Responsibility and support
+
+HUD+ is a free, unofficial, client-side mod, provided under the MIT licence
+**as is, without warranty of any kind**. It changes only what you see in your
+own client: it sends nothing, keeps no telemetry and has no server component,
+so it cannot affect other players or a server's data. Using it is at your own
+risk, and every player is responsible for checking that a server's rules allow
+the modules they turn on (coordinates and keystroke displays are the usual
+ones). The author maintains it in their own time, offers no support guarantee,
+and is not liable for bans, lost items or other consequences of use; the
+licence says the same in legal terms. Bug reports and pull requests are
+welcome in the source repository.
 
 ## Building
 

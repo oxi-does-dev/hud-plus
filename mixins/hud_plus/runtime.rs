@@ -8,7 +8,7 @@ use std::path::Path;
 
 pub const ID: &str = "hud_plus";
 pub const NAME: &str = "HUD+";
-pub const VERSION: &str = "3";
+pub const VERSION: &str = "4";
 pub const DESCRIPTION: &str = "Ultimate configurable HUD: AppleSkin hunger and saturation, effect timers, inventory, armour, coordinates, keystrokes, FPS, time, speed, vitals, held-item info, food tooltips and a drag-and-drop layout editor.";
 pub const CONFIG_FILE: &str = "hud_plus.json";
 pub const CONFIG_VERSION: u32 = 1;
@@ -449,21 +449,24 @@ pub enum TimeFormat {
     Seconds,
     Ticks,
     Both,
+    Off,
 }
 
 impl TimeFormat {
-    pub const ALL: [TimeFormat; 4] = [
+    pub const ALL: [TimeFormat; 5] = [
         TimeFormat::Clock,
         TimeFormat::Seconds,
         TimeFormat::Ticks,
         TimeFormat::Both,
+        TimeFormat::Off,
     ];
     pub fn next(self) -> Self {
         match self {
             TimeFormat::Clock => TimeFormat::Seconds,
             TimeFormat::Seconds => TimeFormat::Ticks,
             TimeFormat::Ticks => TimeFormat::Both,
-            TimeFormat::Both => TimeFormat::Clock,
+            TimeFormat::Both => TimeFormat::Off,
+            TimeFormat::Off => TimeFormat::Clock,
         }
     }
     pub fn key(self) -> &'static str {
@@ -472,6 +475,7 @@ impl TimeFormat {
             TimeFormat::Seconds => "seconds",
             TimeFormat::Ticks => "ticks",
             TimeFormat::Both => "both",
+            TimeFormat::Off => "off",
         }
     }
     pub fn label(self) -> &'static str {
@@ -480,6 +484,7 @@ impl TimeFormat {
             TimeFormat::Seconds => "seconds",
             TimeFormat::Ticks => "ticks",
             TimeFormat::Both => "mm:ss + ticks",
+            TimeFormat::Off => "Off",
         }
     }
     pub fn parse(s: &str) -> Self {
@@ -487,6 +492,7 @@ impl TimeFormat {
             "seconds" => TimeFormat::Seconds,
             "ticks" => TimeFormat::Ticks,
             "both" => TimeFormat::Both,
+            "off" => TimeFormat::Off,
             _ => TimeFormat::Clock,
         }
     }
@@ -706,6 +712,53 @@ impl ModuleId {
     }
 }
 
+/// How much of a module to draw. `Standard` follows the module's own
+/// switches; the other three are presets over them, so a player can make a
+/// module tiny, tidy or exhaustive without touching a dozen toggles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Minimal,
+    Compact,
+    Standard,
+    Full,
+}
+
+impl View {
+    pub const ALL: [View; 4] = [View::Minimal, View::Compact, View::Standard, View::Full];
+    pub fn key(self) -> &'static str {
+        match self {
+            View::Minimal => "minimal",
+            View::Compact => "compact",
+            View::Standard => "standard",
+            View::Full => "full",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            View::Minimal => "Minimal",
+            View::Compact => "Compact",
+            View::Standard => "Standard",
+            View::Full => "Full",
+        }
+    }
+    pub fn next(self) -> Self {
+        match self {
+            View::Minimal => View::Compact,
+            View::Compact => View::Standard,
+            View::Standard => View::Full,
+            View::Full => View::Minimal,
+        }
+    }
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "minimal" => View::Minimal,
+            "compact" => View::Compact,
+            "full" => View::Full,
+            _ => View::Standard,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -760,6 +813,7 @@ impl ModuleBox {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AppleSkin {
     pub module: ModuleBox,
+    pub view: View,
     /// AppleSkin's golden outline over the vanilla hunger icons.
     pub show_saturation: bool,
     /// The hunger and saturation the held item would restore, flashing on
@@ -779,6 +833,7 @@ pub struct AppleSkin {
 impl Default for AppleSkin {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             // `Hud` puts the hunger bar's right edge at `w / 2 + 91` and its
             // icons at `h - 39`; the box is 81 wide (ten 9 px icons 8 apart),
             // and the padding keeps the icons on exactly that spot.
@@ -797,9 +852,44 @@ impl Default for AppleSkin {
     }
 }
 
+impl AppleSkin {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                show_numbers: false,
+                show_exhaustion: false,
+                show_regen: false,
+                show_bars: false,
+                compact: true,
+                ..self
+            },
+            View::Compact => Self {
+                show_numbers: true,
+                show_exhaustion: false,
+                show_regen: false,
+                show_bars: false,
+                compact: true,
+                ..self
+            },
+            View::Full => Self {
+                show_saturation: true,
+                show_preview: true,
+                show_numbers: true,
+                show_exhaustion: true,
+                show_regen: true,
+                show_bars: true,
+                compact: false,
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Effects {
     pub module: ModuleBox,
+    pub view: View,
     pub hide_vanilla: bool,
     pub icons: bool,
     pub names: bool,
@@ -817,6 +907,7 @@ pub struct Effects {
 impl Default for Effects {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::TopRight, [-4.0, 4.0]).on(),
             hide_vanilla: true,
             icons: true,
@@ -834,11 +925,63 @@ impl Default for Effects {
     }
 }
 
+impl Effects {
+    pub fn effective(self) -> Self {
+        let time = if self.time == TimeFormat::Off {
+            TimeFormat::Clock
+        } else {
+            self.time
+        };
+        match self.view {
+            View::Minimal => Self {
+                icons: true,
+                names: false,
+                amplifier: false,
+                ambient: false,
+                time: TimeFormat::Off,
+                max_rows: if self.max_rows <= 0 {
+                    3
+                } else {
+                    self.max_rows.min(3)
+                },
+                ..self
+            },
+            View::Compact => Self {
+                icons: true,
+                names: true,
+                amplifier: false,
+                ambient: false,
+                time,
+                max_rows: if self.max_rows <= 0 {
+                    6
+                } else {
+                    self.max_rows.min(6)
+                },
+                horizontal: self.horizontal,
+                ..self
+            },
+            View::Full => Self {
+                icons: true,
+                names: true,
+                amplifier: true,
+                ambient: true,
+                time,
+                max_rows: 0,
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Inventory {
     pub module: ModuleBox,
+    pub view: View,
     pub columns: i32,
     pub hotbar: bool,
+    /// The main 27-slot grid; off in the Minimal view, which keeps the hotbar.
+    pub grid: bool,
     pub armor: bool,
     pub offhand: bool,
     pub empty: bool,
@@ -855,9 +998,11 @@ pub struct Inventory {
 impl Default for Inventory {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::BottomLeft, [4.0, -26.0]).on(),
             columns: 9,
             hotbar: false,
+            grid: true,
             armor: false,
             offhand: true,
             empty: false,
@@ -873,9 +1018,51 @@ impl Default for Inventory {
     }
 }
 
+impl Inventory {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                columns: 9,
+                hotbar: true,
+                grid: false,
+                armor: false,
+                offhand: false,
+                empty: false,
+                counts: CountMode::Off,
+                durability: ItemDurability::Off,
+                highlight: true,
+                compact_rows: true,
+                ..self
+            },
+            View::Compact => Self {
+                counts: CountMode::Stack,
+                durability: ItemDurability::Bar,
+                empty: false,
+                compact_rows: true,
+                ..self
+            },
+            View::Full => Self {
+                columns: 9,
+                hotbar: true,
+                grid: true,
+                armor: true,
+                offhand: true,
+                empty: true,
+                counts: CountMode::Always,
+                durability: ItemDurability::Both,
+                highlight: true,
+                compact_rows: false,
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Armor {
     pub module: ModuleBox,
+    pub view: View,
     pub names: bool,
     pub percent: bool,
     pub bars: bool,
@@ -886,6 +1073,7 @@ pub struct Armor {
 impl Default for Armor {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::BottomRight, [-4.0, -26.0]).on(),
             names: true,
             percent: true,
@@ -898,9 +1086,39 @@ impl Default for Armor {
     }
 }
 
+impl Armor {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                names: false,
+                percent: false,
+                bars: false,
+                held: false,
+                ..self
+            },
+            View::Compact => Self {
+                names: false,
+                percent: true,
+                bars: false,
+                held: false,
+                ..self
+            },
+            View::Full => Self {
+                names: true,
+                percent: true,
+                bars: true,
+                held: true,
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Coords {
     pub module: ModuleBox,
+    pub view: View,
     pub chunk: bool,
     pub facing: bool,
     pub dimension: bool,
@@ -912,6 +1130,7 @@ pub struct Coords {
 impl Default for Coords {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::TopLeft, [4.0, 4.0]).on().bare(),
             chunk: false,
             facing: true,
@@ -923,9 +1142,45 @@ impl Default for Coords {
     }
 }
 
+impl Coords {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                chunk: false,
+                facing: false,
+                dimension: false,
+                nether: false,
+                yaw_degrees: false,
+                precision: 0,
+                ..self
+            },
+            View::Compact => Self {
+                chunk: false,
+                facing: true,
+                dimension: false,
+                nether: false,
+                yaw_degrees: false,
+                precision: self.precision.min(1),
+                ..self
+            },
+            View::Full => Self {
+                chunk: true,
+                facing: true,
+                dimension: true,
+                nether: true,
+                yaw_degrees: true,
+                precision: self.precision.max(2),
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Keys {
     pub module: ModuleBox,
+    pub view: View,
     pub mouse: bool,
     pub space: bool,
     pub sneak_sprint: bool,
@@ -937,6 +1192,7 @@ pub struct Keys {
 impl Default for Keys {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::MiddleLeft, [4.0, 0.0]).on().bare(),
             mouse: true,
             space: true,
@@ -948,9 +1204,41 @@ impl Default for Keys {
     }
 }
 
+impl Keys {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                mouse: false,
+                space: false,
+                sneak_sprint: false,
+                cps: false,
+                labels: true,
+                ..self
+            },
+            View::Compact => Self {
+                mouse: true,
+                space: false,
+                sneak_sprint: false,
+                cps: false,
+                ..self
+            },
+            View::Full => Self {
+                mouse: true,
+                space: true,
+                sneak_sprint: true,
+                cps: true,
+                labels: true,
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Info {
     pub module: ModuleBox,
+    pub view: View,
     pub fps: bool,
     pub frame_ms: bool,
     pub low_fps: bool,
@@ -964,6 +1252,7 @@ pub struct Info {
 impl Default for Info {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::TopCenter, [0.0, 4.0]).bare(),
             fps: true,
             frame_ms: true,
@@ -977,9 +1266,48 @@ impl Default for Info {
     }
 }
 
+impl Info {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                fps: true,
+                frame_ms: false,
+                low_fps: false,
+                time: false,
+                real_time: false,
+                speed: false,
+                compass: false,
+                ..self
+            },
+            View::Compact => Self {
+                fps: true,
+                frame_ms: false,
+                low_fps: false,
+                time: true,
+                real_time: false,
+                speed: false,
+                compass: false,
+                ..self
+            },
+            View::Full => Self {
+                fps: true,
+                frame_ms: true,
+                low_fps: true,
+                time: true,
+                real_time: true,
+                speed: true,
+                compass: true,
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Health {
     pub module: ModuleBox,
+    pub view: View,
     pub absorption: bool,
     pub armor_value: bool,
     pub food: bool,
@@ -991,6 +1319,7 @@ pub struct Health {
 impl Default for Health {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::BottomLeft, [4.0, -44.0]).bare(),
             absorption: true,
             armor_value: true,
@@ -1002,9 +1331,45 @@ impl Default for Health {
     }
 }
 
+impl Health {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                absorption: false,
+                armor_value: false,
+                food: false,
+                air: false,
+                xp: false,
+                bars: false,
+                ..self
+            },
+            View::Compact => Self {
+                absorption: false,
+                armor_value: false,
+                food: true,
+                air: false,
+                xp: false,
+                bars: true,
+                ..self
+            },
+            View::Full => Self {
+                absorption: true,
+                armor_value: true,
+                food: true,
+                air: true,
+                xp: true,
+                bars: true,
+                ..self
+            },
+            View::Standard => self,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Held {
     pub module: ModuleBox,
+    pub view: View,
     pub offhand: bool,
     pub arrows: bool,
     pub totems: bool,
@@ -1015,12 +1380,45 @@ pub struct Held {
 impl Default for Held {
     fn default() -> Self {
         Self {
+            view: View::Standard,
             module: ModuleBox::new(Anchor::MiddleRight, [-4.0, 62.0]).bare(),
             offhand: true,
             arrows: true,
             totems: true,
             durability: ItemDurability::Both,
             counts: true,
+        }
+    }
+}
+
+impl Held {
+    pub fn effective(self) -> Self {
+        match self.view {
+            View::Minimal => Self {
+                offhand: false,
+                arrows: false,
+                totems: false,
+                counts: false,
+                durability: ItemDurability::Off,
+                ..self
+            },
+            View::Compact => Self {
+                offhand: false,
+                arrows: false,
+                totems: false,
+                counts: true,
+                durability: ItemDurability::Percent,
+                ..self
+            },
+            View::Full => Self {
+                offhand: true,
+                arrows: true,
+                totems: true,
+                counts: true,
+                durability: ItemDurability::Both,
+                ..self
+            },
+            View::Standard => self,
         }
     }
 }
@@ -1355,6 +1753,32 @@ impl Config {
             ModuleId::Held => &mut self.held.module,
         }
     }
+    pub fn view(&self, id: ModuleId) -> View {
+        match id {
+            ModuleId::AppleSkin => self.apple_skin.view,
+            ModuleId::Effects => self.effects.view,
+            ModuleId::Inventory => self.inventory.view,
+            ModuleId::Armor => self.armor.view,
+            ModuleId::Coords => self.coords.view,
+            ModuleId::Keys => self.keys.view,
+            ModuleId::Info => self.info.view,
+            ModuleId::Health => self.health.view,
+            ModuleId::Held => self.held.view,
+        }
+    }
+    pub fn view_mut(&mut self, id: ModuleId) -> &mut View {
+        match id {
+            ModuleId::AppleSkin => &mut self.apple_skin.view,
+            ModuleId::Effects => &mut self.effects.view,
+            ModuleId::Inventory => &mut self.inventory.view,
+            ModuleId::Armor => &mut self.armor.view,
+            ModuleId::Coords => &mut self.coords.view,
+            ModuleId::Keys => &mut self.keys.view,
+            ModuleId::Info => &mut self.info.view,
+            ModuleId::Health => &mut self.health.view,
+            ModuleId::Held => &mut self.held.view,
+        }
+    }
     pub fn reset_layout(&mut self) {
         let d = Config::default();
         for id in ModuleId::ALL {
@@ -1420,6 +1844,14 @@ impl Config {
             }
             Profile::Custom => {}
         }
+        let view = match profile {
+            Profile::Minimal => View::Minimal,
+            Profile::Pvp => View::Compact,
+            _ => View::Standard,
+        };
+        for id in ModuleId::ALL {
+            *self.view_mut(id) = view;
+        }
     }
 
     pub fn to_json(&self) -> String {
@@ -1436,6 +1868,7 @@ impl Config {
             "grid": self.grid,
             "show_help": self.show_help,
             "apple_skin": {
+                "view": self.apple_skin.view.key(),
                 "module": module_json(&self.apple_skin.module),
                 "show_saturation": self.apple_skin.show_saturation,
                 "show_exhaustion": self.apple_skin.show_exhaustion,
@@ -1447,6 +1880,7 @@ impl Config {
                 "compact": self.apple_skin.compact,
             },
             "effects": {
+                "view": self.effects.view.key(),
                 "module": module_json(&self.effects.module),
                 "hide_vanilla": self.effects.hide_vanilla,
                 "icons": self.effects.icons,
@@ -1462,9 +1896,11 @@ impl Config {
                 "horizontal": self.effects.horizontal,
             },
             "inventory": {
+                "view": self.inventory.view.key(),
                 "module": module_json(&self.inventory.module),
                 "columns": self.inventory.columns,
                 "hotbar": self.inventory.hotbar,
+                "grid": self.inventory.grid,
                 "armor": self.inventory.armor,
                 "offhand": self.inventory.offhand,
                 "empty": self.inventory.empty,
@@ -1478,6 +1914,7 @@ impl Config {
                 "compact_rows": self.inventory.compact_rows,
             },
             "armor": {
+                "view": self.armor.view.key(),
                 "module": module_json(&self.armor.module),
                 "names": self.armor.names,
                 "percent": self.armor.percent,
@@ -1486,6 +1923,7 @@ impl Config {
                 "threshold": self.armor.threshold,
             },
             "coords": {
+                "view": self.coords.view.key(),
                 "module": module_json(&self.coords.module),
                 "chunk": self.coords.chunk,
                 "facing": self.coords.facing,
@@ -1495,6 +1933,7 @@ impl Config {
                 "yaw_degrees": self.coords.yaw_degrees,
             },
             "keys": {
+                "view": self.keys.view.key(),
                 "module": module_json(&self.keys.module),
                 "mouse": self.keys.mouse,
                 "space": self.keys.space,
@@ -1504,6 +1943,7 @@ impl Config {
                 "box_size": self.keys.box_size,
             },
             "info": {
+                "view": self.info.view.key(),
                 "module": module_json(&self.info.module),
                 "fps": self.info.fps,
                 "frame_ms": self.info.frame_ms,
@@ -1515,6 +1955,7 @@ impl Config {
                 "clock24": self.info.clock24,
             },
             "health": {
+                "view": self.health.view.key(),
                 "module": module_json(&self.health.module),
                 "absorption": self.health.absorption,
                 "armor_value": self.health.armor_value,
@@ -1524,6 +1965,7 @@ impl Config {
                 "bars": self.health.bars,
             },
             "held": {
+                "view": self.held.view.key(),
                 "module": module_json(&self.held.module),
                 "offhand": self.held.offhand,
                 "arrows": self.held.arrows,
@@ -1683,6 +2125,7 @@ fn apple_skin_from(v: &serde_json::Value) -> AppleSkin {
         return d;
     };
     AppleSkin {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         show_saturation: get_bool(s, "show_saturation", d.show_saturation),
         show_exhaustion: get_bool(s, "show_exhaustion", d.show_exhaustion),
@@ -1701,6 +2144,7 @@ fn effects_from(v: &serde_json::Value) -> Effects {
         return d;
     };
     Effects {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         hide_vanilla: get_bool(s, "hide_vanilla", d.hide_vanilla),
         icons: get_bool(s, "icons", d.icons),
@@ -1723,9 +2167,11 @@ fn inventory_from(v: &serde_json::Value) -> Inventory {
         return d;
     };
     Inventory {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         columns: get_i32(s, "columns", d.columns).clamp(1, 9),
         hotbar: get_bool(s, "hotbar", d.hotbar),
+        grid: get_bool(s, "grid", d.grid),
         armor: get_bool(s, "armor", d.armor),
         offhand: get_bool(s, "offhand", d.offhand),
         empty: get_bool(s, "empty", d.empty),
@@ -1746,6 +2192,7 @@ fn armor_from(v: &serde_json::Value) -> Armor {
         return d;
     };
     Armor {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         names: get_bool(s, "names", d.names),
         percent: get_bool(s, "percent", d.percent),
@@ -1761,6 +2208,7 @@ fn coords_from(v: &serde_json::Value) -> Coords {
         return d;
     };
     Coords {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         chunk: get_bool(s, "chunk", d.chunk),
         facing: get_bool(s, "facing", d.facing),
@@ -1777,6 +2225,7 @@ fn keys_from(v: &serde_json::Value) -> Keys {
         return d;
     };
     Keys {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         mouse: get_bool(s, "mouse", d.mouse),
         space: get_bool(s, "space", d.space),
@@ -1793,6 +2242,7 @@ fn info_from(v: &serde_json::Value) -> Info {
         return d;
     };
     Info {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         fps: get_bool(s, "fps", d.fps),
         frame_ms: get_bool(s, "frame_ms", d.frame_ms),
@@ -1811,6 +2261,7 @@ fn health_from(v: &serde_json::Value) -> Health {
         return d;
     };
     Health {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         absorption: get_bool(s, "absorption", d.absorption),
         armor_value: get_bool(s, "armor_value", d.armor_value),
@@ -1827,6 +2278,7 @@ fn held_from(v: &serde_json::Value) -> Held {
         return d;
     };
     Held {
+        view: View::parse(get_str(s, "view", d.view.key())),
         module: module_from(s, d.module),
         offhand: get_bool(s, "offhand", d.offhand),
         arrows: get_bool(s, "arrows", d.arrows),
@@ -2131,6 +2583,9 @@ fn panel(p: &mut dyn Painter, cfg: &Config, m: &ModuleBox, r: Rect) -> Colours {
 }
 
 fn duration_text(duration: i32, format: TimeFormat) -> String {
+    if format == TimeFormat::Off {
+        return String::new();
+    }
     if duration < 0 {
         return "∞".into();
     }
@@ -2141,6 +2596,7 @@ fn duration_text(duration: i32, format: TimeFormat) -> String {
         TimeFormat::Seconds => format!("{secs}s"),
         TimeFormat::Clock => format!("{}:{:02}", secs / 60, secs % 60),
         TimeFormat::Both => format!("{}:{:02} ({secs}s)", secs / 60, secs % 60),
+        TimeFormat::Off => String::new(),
     }
 }
 
@@ -2532,6 +2988,7 @@ fn draw_body(
 // ---------------------------------------------------------------------------
 
 pub fn coords_lines(s: &Snapshot, c: &Coords) -> Vec<String> {
+    let c = &c.effective();
     let p = c.precision;
     let mut out = vec![format!(
         "XYZ {} {} {}",
@@ -2573,13 +3030,15 @@ pub fn coords_lines(s: &Snapshot, c: &Coords) -> Vec<String> {
 }
 
 fn size_coords(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.coords.module;
-    lines_size(p, &coords_lines(s, &cfg.coords), m)
+    let c = &cfg.coords.effective();
+    let m = &c.module;
+    lines_size(p, &coords_lines(s, c), m)
 }
 
 fn draw_coords(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.coords.module;
-    let lines = coords_lines(s, &cfg.coords);
+    let c = &cfg.coords.effective();
+    let m = &c.module;
+    let lines = coords_lines(s, c);
     draw_lines(p, cfg, m, r, &lines, col.text, col.muted);
 }
 
@@ -2619,6 +3078,7 @@ fn draw_lines(
 // ---------------------------------------------------------------------------
 
 pub fn info_lines(s: &Snapshot, c: &Info) -> Vec<String> {
+    let c = &c.effective();
     let mut out = Vec::new();
     if c.fps || c.frame_ms || c.low_fps {
         let mut line = String::new();
@@ -2666,21 +3126,15 @@ pub fn info_lines(s: &Snapshot, c: &Info) -> Vec<String> {
 }
 
 fn size_info(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.info.module;
-    lines_size(p, &info_lines(s, &cfg.info), m)
+    let c = &cfg.info.effective();
+    let m = &c.module;
+    lines_size(p, &info_lines(s, c), m)
 }
 
 fn draw_info(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.info.module;
-    draw_lines(
-        p,
-        cfg,
-        m,
-        r,
-        &info_lines(s, &cfg.info),
-        col.accent,
-        col.text,
-    );
+    let c = &cfg.info.effective();
+    let m = &c.module;
+    draw_lines(p, cfg, m, r, &info_lines(s, c), col.accent, col.text);
 }
 
 // ---------------------------------------------------------------------------
@@ -2696,6 +3150,7 @@ pub struct VitalRow {
 }
 
 pub fn health_rows(s: &Snapshot, c: &Health) -> Vec<VitalRow> {
+    let c = &c.effective();
     let mut out = Vec::new();
     out.push(VitalRow {
         label: "Health".into(),
@@ -2757,8 +3212,9 @@ pub fn health_rows(s: &Snapshot, c: &Health) -> Vec<VitalRow> {
 }
 
 fn size_health(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.health.module;
-    let rows = health_rows(s, &cfg.health);
+    let c = &cfg.health.effective();
+    let m = &c.module;
+    let rows = health_rows(s, c);
     let icon = 9.0 * m.scale + 2.0;
     let w = rows
         .iter()
@@ -2767,23 +3223,20 @@ fn size_health(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
             icon + p.width(&r.label) * m.scale + 6.0 + p.width(&r.value) * m.scale
         })
         .fold(0.0, f32::max);
-    let bar = if cfg.health.bars {
-        2.0 * m.scale + 1.0
-    } else {
-        0.0
-    };
+    let bar = if c.bars { 2.0 * m.scale + 1.0 } else { 0.0 };
     let h = rows.len() as f32 * (line_h(m) + bar) - 1.0;
     (w + 2.0 * pad(m), h + 2.0 * pad(m))
 }
 
 fn draw_health(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.health.module;
+    let c = &cfg.health.effective();
+    let m = &c.module;
     let pad = pad(m);
     let lh = line_h(m);
-    let bar_h = if cfg.health.bars { 2.0 * m.scale } else { 0.0 };
+    let bar_h = if c.bars { 2.0 * m.scale } else { 0.0 };
     let icon_size = 9.0 * m.scale;
     let mut y = r.y + pad;
-    for row in health_rows(s, &cfg.health) {
+    for row in health_rows(s, c) {
         let mut x = r.x + pad;
         if let Some(icon) = row.icon {
             p.sprite(icon, Rect::new(x, y, icon_size, icon_size));
@@ -2801,7 +3254,7 @@ fn draw_health(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &C
             m.scale,
         );
         let lw = r.w - 2.0 * pad;
-        if cfg.health.bars {
+        if c.bars {
             bar(
                 p,
                 Rect::new(r.x + pad, y + lh - 1.0, lw, bar_h),
@@ -2834,6 +3287,7 @@ fn durability_color(percent: Option<i32>, warn: i32) -> u32 {
 }
 
 pub fn armor_rows(s: &Snapshot, c: &Armor) -> Vec<DurabilityRow> {
+    let c = &c.effective();
     let names = ["Helmet", "Chestplate", "Leggings", "Boots"];
     let mut out = Vec::new();
     for (i, slot) in s.armor_items.iter().enumerate().take(4) {
@@ -2845,7 +3299,9 @@ pub fn armor_rows(s: &Snapshot, c: &Armor) -> Vec<DurabilityRow> {
                 String::new()
             };
             out.push(DurabilityRow {
-                name: if c.names {
+                name: if c.view == View::Minimal {
+                    String::new()
+                } else if c.names {
                     format!("{}: {}", names[i], item.name)
                 } else {
                     item.name.clone()
@@ -2880,8 +3336,9 @@ pub fn armor_rows(s: &Snapshot, c: &Armor) -> Vec<DurabilityRow> {
 }
 
 fn size_armor(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.armor.module;
-    let rows = armor_rows(s, &cfg.armor);
+    let c = &cfg.armor.effective();
+    let m = &c.module;
+    let rows = armor_rows(s, c);
     if rows.is_empty() {
         return (0.0, 0.0);
     }
@@ -2895,18 +3352,21 @@ fn size_armor(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
 }
 
 fn draw_armor(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.armor.module;
+    let c = &cfg.armor.effective();
+    let m = &c.module;
     let pad = pad(m);
     let lh = line_h(m);
     let icon = 9.0 * m.scale;
-    for (i, row) in armor_rows(s, &cfg.armor).iter().enumerate() {
+    for (i, row) in armor_rows(s, c).iter().enumerate() {
         let y = r.y + pad + lh * i as f32;
         let mut x = r.x + pad;
         if let Some(item) = &row.item {
             p.item(item, x, y, icon);
             x += icon + 2.0 * m.scale;
         }
-        txt(p, cfg, &row.name, x, y, col.text, m.scale);
+        if !row.name.is_empty() {
+            txt(p, cfg, &row.name, x, y, col.text, m.scale);
+        }
         let dw = p.width(&row.detail) * m.scale;
         txt(
             p,
@@ -2917,7 +3377,7 @@ fn draw_armor(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Co
             row.color,
             m.scale,
         );
-        if cfg.armor.bars
+        if c.bars
             && let Some(item) = &row.item
             && let Some(wear) = item.wear()
         {
@@ -2938,6 +3398,7 @@ fn draw_armor(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Co
 }
 
 pub fn held_rows(s: &Snapshot, c: &Held) -> Vec<DurabilityRow> {
+    let c = &c.effective();
     let mut out = Vec::new();
     let mut push = |item: &ItemView, prefix: &str| {
         let percent = item.left_percent();
@@ -2995,8 +3456,9 @@ pub fn held_rows(s: &Snapshot, c: &Held) -> Vec<DurabilityRow> {
 }
 
 fn size_held(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.held.module;
-    let rows = held_rows(s, &cfg.held);
+    let c = &cfg.held.effective();
+    let m = &c.module;
+    let rows = held_rows(s, c);
     if rows.is_empty() {
         return (0.0, 0.0);
     }
@@ -3010,11 +3472,12 @@ fn size_held(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
 }
 
 fn draw_held(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.held.module;
+    let c = &cfg.held.effective();
+    let m = &c.module;
     let pad = pad(m);
     let lh = line_h(m);
     let icon = 9.0 * m.scale;
-    for (i, row) in held_rows(s, &cfg.held).iter().enumerate() {
+    for (i, row) in held_rows(s, c).iter().enumerate() {
         let y = r.y + pad + lh * i as f32;
         let mut x = r.x + pad;
         if let Some(item) = &row.item {
@@ -3032,10 +3495,8 @@ fn draw_held(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
             row.color,
             m.scale,
         );
-        if matches!(
-            cfg.held.durability,
-            ItemDurability::Bar | ItemDurability::Both
-        ) && let Some(item) = &row.item
+        if matches!(c.durability, ItemDurability::Bar | ItemDurability::Both)
+            && let Some(item) = &row.item
             && let Some(percent) = item.left_percent()
         {
             let w = r.w - 2.0 * pad;
@@ -3055,6 +3516,7 @@ fn draw_held(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
 // ---------------------------------------------------------------------------
 
 pub fn apple_text(s: &Snapshot, c: &AppleSkin) -> Vec<(String, u32)> {
+    let c = &c.effective();
     let mut out = Vec::new();
     if !c.show_numbers {
         return out;
@@ -3168,12 +3630,13 @@ fn saturation_outlines(
 }
 
 fn size_apple_skin(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.apple_skin.module;
+    let c = &cfg.apple_skin.effective();
+    let m = &c.module;
     let pad = pad(m);
     // The bar part follows the vanilla layer's scale; the numbers and the
     // padding are the module's own.
     let bar_scale = m.scale * apple_skin_scale(cfg);
-    let text = apple_text(s, &cfg.apple_skin);
+    let text = apple_text(s, c);
     let text_w = text
         .iter()
         .map(|(t, _)| p.width(t) * m.scale)
@@ -3184,8 +3647,8 @@ fn size_apple_skin(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
 }
 
 fn draw_apple_skin(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.apple_skin.module;
-    let c = &cfg.apple_skin;
+    let c = &cfg.apple_skin.effective();
+    let m = &c.module;
     let pad = pad(m);
     let bar_scale = m.scale * apple_skin_scale(cfg);
     let icon = 9.0 * bar_scale;
@@ -3280,16 +3743,17 @@ fn key_rows(c: &Keys) -> usize {
 }
 
 fn size_keys(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.keys.module;
-    let (k, g) = key_geom(m, &cfg.keys);
+    let c = &cfg.keys.effective();
+    let m = &c.module;
+    let (k, g) = key_geom(m, c);
     let pad = pad(m);
-    let rows = key_rows(&cfg.keys);
+    let rows = key_rows(c);
     let full = 3.0 * k + 2.0 * g;
     let mut w = full;
     let mut h = rows as f32 * k + (rows as f32 - 1.0) * g;
-    if cfg.keys.cps {
+    if c.cps {
         let cps = format!("{} | {} cps", s.cps.0, s.cps.1);
-        if cfg.keys.mouse {
+        if c.mouse {
             w += 4.0 * m.scale + p.width(&cps) * m.scale;
         } else {
             w = w.max(p.width(&cps) * m.scale);
@@ -3306,7 +3770,7 @@ fn key_box(
     r: Rect,
     lit: bool,
     label: &str,
-    scale: f32,
+    c: &Keys,
 ) {
     // A lit key is a glow, not a block of paint: a translucent accent fill
     // leaves the world visible and the white label readable.
@@ -3328,12 +3792,12 @@ fn key_box(
             shade(col.slot, 1.35)
         },
     );
-    if cfg.keys.labels && !label.is_empty() {
+    if c.labels && !label.is_empty() {
         // A localized key name can be longer than its box ("Left Ctrl" in a
         // half-row key): shrink it to fit, and only then shorten it, so no two
         // labels ever overlap.
         let max = (r.w - 4.0).max(1.0);
-        let mut scale = scale;
+        let mut scale = c.module.scale;
         let mut text = label.to_owned();
         let mut tw = p.width(&text) * scale;
         if tw > max {
@@ -3358,8 +3822,9 @@ fn key_box(
 }
 
 fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.keys.module;
-    let (k, g) = key_geom(m, &cfg.keys);
+    let c = &cfg.keys.effective();
+    let m = &c.module;
+    let (k, g) = key_geom(m, c);
     let pad = pad(m);
     let x = r.x + pad;
     let mut y = r.y + pad;
@@ -3381,7 +3846,7 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
         Rect::new(x + k + g, y, k, k),
         keys.forward,
         &labels(0, "W"),
-        m.scale,
+        c,
     );
     y += k + g;
     key_box(
@@ -3391,7 +3856,7 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
         Rect::new(x, y, k, k),
         keys.left,
         &labels(2, "A"),
-        m.scale,
+        c,
     );
     key_box(
         p,
@@ -3400,7 +3865,7 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
         Rect::new(x + k + g, y, k, k),
         keys.back,
         &labels(1, "S"),
-        m.scale,
+        c,
     );
     key_box(
         p,
@@ -3409,10 +3874,10 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
         Rect::new(x + 2.0 * (k + g), y, k, k),
         keys.right,
         &labels(3, "D"),
-        m.scale,
+        c,
     );
     y += k + g;
-    if cfg.keys.space {
+    if c.space {
         key_box(
             p,
             cfg,
@@ -3420,11 +3885,11 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
             Rect::new(x, y, full, k),
             keys.jump,
             &labels(4, "Space"),
-            m.scale,
+            c,
         );
         y += k + g;
     }
-    if cfg.keys.sneak_sprint {
+    if c.sneak_sprint {
         let half = (full - g) / 2.0;
         key_box(
             p,
@@ -3433,7 +3898,7 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
             Rect::new(x, y, half, k),
             keys.sneak,
             &labels(5, "Shift"),
-            m.scale,
+            c,
         );
         key_box(
             p,
@@ -3442,11 +3907,11 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
             Rect::new(x + half + g, y, half, k),
             keys.sprint,
             &labels(6, "Ctrl"),
-            m.scale,
+            c,
         );
         y += k + g;
     }
-    if cfg.keys.mouse {
+    if c.mouse {
         let half = (full - g) / 2.0;
         key_box(
             p,
@@ -3455,7 +3920,7 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
             Rect::new(x, y, half, k),
             keys.mouse[0],
             "LMB",
-            m.scale,
+            c,
         );
         key_box(
             p,
@@ -3464,9 +3929,9 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
             Rect::new(x + half + g, y, half, k),
             keys.mouse[2],
             "RMB",
-            m.scale,
+            c,
         );
-        if cfg.keys.cps {
+        if c.cps {
             let cps = format!("{} | {} cps", s.cps.0, s.cps.1);
             let tw = p.width(&cps) * m.scale;
             txt(
@@ -3481,7 +3946,7 @@ fn draw_keys(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Col
         }
         y += k + g;
     }
-    if cfg.keys.cps && !cfg.keys.mouse {
+    if c.cps && !c.mouse {
         let cps = format!("{} | {} cps", s.cps.0, s.cps.1);
         txt(p, cfg, &cps, x, y + g * 0.5, col.text, m.scale);
     }
@@ -3503,6 +3968,7 @@ pub struct EffectCell {
 }
 
 pub fn effect_cells(s: &Snapshot, c: &Effects) -> Vec<EffectCell> {
+    let c = &c.effective();
     let mut list: Vec<EffectView> = s
         .effects
         .iter()
@@ -3608,9 +4074,10 @@ fn effects_cell_width(p: &dyn Painter, cells: &[EffectCell], c: &Effects, icon: 
 }
 
 fn size_effects(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let m = &cfg.effects.module;
-    let cells = effect_cells(s, &cfg.effects);
-    let shown = effects_shown(cells.len(), &cfg.effects);
+    let c = &cfg.effects.effective();
+    let m = &c.module;
+    let cells = effect_cells(s, c);
+    let shown = effects_shown(cells.len(), c);
     if shown == 0 {
         return (0.0, 0.0);
     }
@@ -3619,8 +4086,8 @@ fn size_effects(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
     let icon = effect_icon(m);
     let gap = 3.0 * m.scale;
     let row_h = (icon + 1.0 * m.scale).max(line_h(m));
-    let cell_w = effects_cell_width(p, cells, &cfg.effects, icon);
-    let (cols, rows) = effects_grid(shown, &cfg.effects);
+    let cell_w = effects_cell_width(p, cells, c, icon);
+    let (cols, rows) = effects_grid(shown, c);
     let w = cols as f32 * (cell_w + gap) - gap;
     let mut h = rows as f32 * (row_h + gap) - gap;
     if shown < cells.len() {
@@ -3630,9 +4097,10 @@ fn size_effects(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
 }
 
 fn draw_effects(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let m = &cfg.effects.module;
-    let all = effect_cells(s, &cfg.effects);
-    let shown = effects_shown(all.len(), &cfg.effects);
+    let c = &cfg.effects.effective();
+    let m = &c.module;
+    let all = effect_cells(s, c);
+    let shown = effects_shown(all.len(), c);
     if shown == 0 {
         return;
     }
@@ -3641,33 +4109,25 @@ fn draw_effects(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &
     let icon = effect_icon(m);
     let gap = 3.0 * m.scale;
     let row_h = (icon + 1.0 * m.scale).max(line_h(m));
-    let (_cols, rows) = effects_grid(shown, &cfg.effects);
-    let cell_w = effects_cell_width(p, cells, &cfg.effects, icon);
+    let (_cols, rows) = effects_grid(shown, c);
+    let cell_w = effects_cell_width(p, cells, c, icon);
     for (i, cell) in cells.iter().enumerate() {
-        let col_i = if cfg.effects.horizontal {
-            i / rows.max(1)
-        } else {
-            0
-        };
-        let row_i = if cfg.effects.horizontal {
-            i % rows.max(1)
-        } else {
-            i
-        };
+        let col_i = if c.horizontal { i / rows.max(1) } else { 0 };
+        let row_i = if c.horizontal { i % rows.max(1) } else { i };
         let mut x = r.x + pad + col_i as f32 * (cell_w + gap);
         let y = r.y + pad + row_i as f32 * (row_h + gap);
-        if cfg.effects.icons {
+        if c.icons {
             if !p.sprite(&cell.sprite, Rect::new(x, y, icon, icon)) {
                 p.fill(Rect::new(x, y, icon, icon), with_alpha(col.accent, 90));
             }
             x += icon + 2.0 * m.scale;
         }
-        let name_color = if cell.ambient && cfg.effects.ambient {
+        let name_color = if cell.ambient && c.ambient {
             with_alpha(cell.color, 170)
         } else {
             cell.color
         };
-        if cfg.effects.names {
+        if c.names {
             txt(
                 p,
                 cfg,
@@ -3679,7 +4139,7 @@ fn draw_effects(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &
             );
             x += p.width(&cell.name) * m.scale;
         }
-        if cfg.effects.amplifier && !cell.amplifier.is_empty() {
+        if c.amplifier && !cell.amplifier.is_empty() {
             x += 2.0 * m.scale;
             txt(
                 p,
@@ -3729,10 +4189,15 @@ pub struct SlotCell {
 }
 
 pub fn inventory_cells(s: &Snapshot, c: &Inventory) -> Vec<SlotCell> {
+    let c = &c.effective();
     let mut out = Vec::new();
     let n = s.inventory.len().min(36);
     for i in 0..n {
-        if !c.hotbar && i < 9 {
+        let hotbar = i < 9;
+        if hotbar && !c.hotbar {
+            continue;
+        }
+        if !hotbar && !c.grid {
             continue;
         }
         out.push(SlotCell {
@@ -3748,6 +4213,7 @@ pub fn inventory_cells(s: &Snapshot, c: &Inventory) -> Vec<SlotCell> {
 /// stays a compact list of what the player carries rather than a full grid of
 /// holes.
 fn shown_inventory_cells(s: &Snapshot, c: &Inventory) -> Vec<SlotCell> {
+    let c = &c.effective();
     let mut cells = inventory_cells(s, c);
     if !c.empty {
         cells.retain(|cell| cell.item.is_some());
@@ -3756,6 +4222,7 @@ fn shown_inventory_cells(s: &Snapshot, c: &Inventory) -> Vec<SlotCell> {
 }
 
 pub fn armor_cells(s: &Snapshot, c: &Inventory) -> Vec<Option<ItemView>> {
+    let c = &c.effective();
     let mut out = Vec::new();
     if !c.armor {
         return out;
@@ -3774,6 +4241,7 @@ fn inv_geom(m: &ModuleBox, c: &Inventory) -> (f32, f32) {
 }
 
 fn inventory_size_parts(s: &Snapshot, c: &Inventory, p: &dyn Painter) -> (f32, f32, usize) {
+    let c = &c.effective();
     let cells = shown_inventory_cells(s, c);
     let cols = c.columns.clamp(1, 9) as usize;
     let rows = if cells.is_empty() {
@@ -3823,7 +4291,7 @@ fn size_inventory(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
 }
 
 fn draw_inventory(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let c = &cfg.inventory;
+    let c = &cfg.inventory.effective();
     let m = &c.module;
     let pad = pad(m);
     let (slot, gap) = inv_geom(m, c);
@@ -4264,6 +4732,7 @@ impl Num {
 pub enum Pick {
     Profile,
     Theme,
+    View(ModuleId),
     EditorHotkey,
     SettingsHotkey,
     EffectTime,
@@ -4280,6 +4749,7 @@ impl Pick {
         match self {
             Profile => c.profile.label().into(),
             Theme => c.theme.label().into(),
+            View(id) => c.view(id).label().into(),
             EditorHotkey => c.editor_hotkey.label().into(),
             SettingsHotkey => c.settings_hotkey.label().into(),
             EffectTime => c.effects.time.label().into(),
@@ -4303,6 +4773,10 @@ impl Pick {
                 c.apply_profile(p);
             }
             Theme => c.theme = if up { c.theme.next() } else { c.theme.prev() },
+            View(id) => {
+                let v = c.view(id);
+                *c.view_mut(id) = if up { v.next() } else { v.prev() };
+            }
             EditorHotkey => {
                 c.editor_hotkey = if up {
                     c.editor_hotkey.next()
@@ -4384,6 +4858,7 @@ prev_impl!(EffectSort);
 prev_impl!(InventoryWhen);
 prev_impl!(ItemDurability);
 prev_impl!(CountMode);
+prev_impl!(View);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -4510,6 +4985,7 @@ pub fn setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     let module = |rows: &mut Vec<_>, id: M| {
         let s = id.title();
         rows.push((Module(id, MF::Enabled), "Enabled", s));
+        rows.push((Choice(P::View(id)), "View", s));
         rows.push((Module(id, MF::Anchor), "Anchor", s));
         rows.push((Module(id, MF::Scale), "Scale", s));
         rows.push((Module(id, MF::Background), "Background", s));
@@ -6007,5 +6483,170 @@ mod tests {
         assert_eq!(s.totems_in_inventory(), 2);
         assert!(is_arrow("minecraft:arrow"));
         assert!(!is_arrow("minecraft:arrowhead"));
+    }
+
+    #[test]
+    fn views_cycle_and_parse() {
+        assert_eq!(View::ALL.len(), 4);
+        assert_eq!(View::Minimal.next(), View::Compact);
+        assert_eq!(View::Compact.next(), View::Standard);
+        assert_eq!(View::Standard.next(), View::Full);
+        assert_eq!(View::Full.next(), View::Minimal);
+        assert_eq!(View::Full.prev(), View::Standard);
+        assert_eq!(View::parse("compact"), View::Compact);
+        assert_eq!(View::parse("minimal"), View::Minimal);
+        assert_eq!(View::parse("full"), View::Full);
+        assert_eq!(View::parse("nope"), View::Standard);
+    }
+
+    #[test]
+    fn views_shrink_and_grow_every_module() {
+        let s = snapshot();
+        let view = |v: View| v;
+
+        let apple = AppleSkin {
+            view: view(View::Minimal),
+            ..AppleSkin::default()
+        };
+        assert!(apple_text(&s, &apple).is_empty());
+        assert!(!apple.effective().show_bars);
+        let apple = AppleSkin {
+            view: View::Full,
+            ..AppleSkin::default()
+        };
+        assert!(apple.effective().show_numbers);
+        assert!(apple.effective().show_exhaustion);
+        assert!(apple.effective().show_bars);
+
+        let effects = Effects {
+            view: View::Minimal,
+            ..Effects::default()
+        };
+        assert_eq!(effects.effective().time, TimeFormat::Off);
+        assert!(!effects.effective().names);
+        assert_eq!(effects_shown(10, &effects.effective()), 3);
+        let effects = Effects {
+            view: View::Full,
+            ..Effects::default()
+        };
+        assert_eq!(effects.effective().max_rows, 0);
+        assert!(effects.effective().names);
+        assert_eq!(effects_shown(10, &effects.effective()), 10);
+
+        let mut s36 = snapshot();
+        s36.inventory = vec![None; 36];
+        let inv = Inventory {
+            view: View::Minimal,
+            ..Inventory::default()
+        };
+        assert_eq!(inventory_cells(&s36, &inv).len(), 9);
+        assert!(!inv.effective().grid);
+        let inv = Inventory {
+            view: View::Full,
+            ..Inventory::default()
+        };
+        assert_eq!(inventory_cells(&s36, &inv).len(), 36);
+        assert!(inv.effective().armor);
+
+        let coords = Coords {
+            view: View::Minimal,
+            ..Coords::default()
+        };
+        assert_eq!(coords_lines(&s, &coords).len(), 1);
+        let coords = Coords {
+            view: View::Compact,
+            ..Coords::default()
+        };
+        assert_eq!(coords_lines(&s, &coords).len(), 2);
+        let coords = Coords {
+            view: View::Full,
+            ..Coords::default()
+        };
+        assert!(coords_lines(&s, &coords).len() >= 4);
+
+        let keys = Keys {
+            view: View::Minimal,
+            ..Keys::default()
+        };
+        assert_eq!(key_rows(&keys.effective()), 2);
+        let keys = Keys {
+            view: View::Compact,
+            ..Keys::default()
+        };
+        assert_eq!(key_rows(&keys.effective()), 3);
+        let keys = Keys {
+            view: View::Full,
+            ..Keys::default()
+        };
+        assert_eq!(key_rows(&keys.effective()), 5);
+
+        let info = Info {
+            view: View::Minimal,
+            ..Info::default()
+        };
+        assert_eq!(info_lines(&s, &info).len(), 1);
+        let info = Info {
+            view: View::Full,
+            ..Info::default()
+        };
+        assert!(info_lines(&s, &info).len() >= 5);
+
+        let mut full = snapshot();
+        full.absorption = 4.0;
+        full.air = 120;
+        let health = Health {
+            view: View::Minimal,
+            ..Health::default()
+        };
+        assert_eq!(health_rows(&full, &health).len(), 1);
+        let health = Health {
+            view: View::Compact,
+            ..Health::default()
+        };
+        assert_eq!(health_rows(&full, &health).len(), 2);
+        let health = Health {
+            view: View::Full,
+            ..Health::default()
+        };
+        assert_eq!(health_rows(&full, &health).len(), 6);
+
+        let item = ItemView {
+            id: "minecraft:diamond_helmet".into(),
+            name: "Diamond Helmet".into(),
+            count: 1,
+            damage: 200,
+            max_damage: 363,
+        };
+        let mut armored = snapshot();
+        armored.armor_items = vec![Some(item.clone())];
+        armored.held = Some(item.clone());
+        armored.offhand = Some(item);
+        let armor = Armor {
+            view: View::Minimal,
+            ..Armor::default()
+        };
+        let rows = armor_rows(&armored, &armor);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].name.is_empty());
+        assert!(rows[0].detail.is_empty());
+        let armor = Armor {
+            view: View::Full,
+            ..Armor::default()
+        };
+        assert_eq!(armor_rows(&armored, &armor).len(), 3);
+        assert!(armor_rows(&armored, &armor)[0].name.contains("Helmet"));
+
+        let held = Held {
+            view: View::Minimal,
+            ..Held::default()
+        };
+        assert_eq!(held_rows(&armored, &held).len(), 1);
+        assert!(held_rows(&armored, &held)[0].detail.is_empty());
+        let held = Held {
+            view: View::Full,
+            ..Held::default()
+        };
+        assert_eq!(held_rows(&armored, &held).len(), 2);
+        assert!(held_rows(&armored, &held)[1].name.starts_with("Off: "));
     }
 }
