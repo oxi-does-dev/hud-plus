@@ -2812,6 +2812,16 @@ pub fn offset_for(
     [(at.0.clamp(0.0, max_x)) - bx, (at.1.clamp(0.0, max_y)) - by]
 }
 
+/// Snaps an offset around the module's own default, so dragging back to where
+/// the module started lands on the exact default offset even when that offset
+/// (4, -41, 3, ...) is not a multiple of the grid.
+fn snap_offset(grid: u8, base: [f32; 2], offset: [f32; 2]) -> [f32; 2] {
+    [
+        base[0] + snap_to(grid, offset[0] - base[0]),
+        base[1] + snap_to(grid, offset[1] - base[1]),
+    ]
+}
+
 pub fn snap_to(grid: u8, v: f32) -> f32 {
     let g = f32::from(grid.max(1));
     (v / g).round() * g
@@ -5873,13 +5883,13 @@ pub fn editor_drag(at: [f32; 2]) -> bool {
     };
     let cfg = config(Config::default);
     let (sw, sh) = screen_size_cache();
-    let mut x = at[0] - e.grab[0];
-    let mut y = at[1] - e.grab[1];
+    let x = at[0] - e.grab[0];
+    let y = at[1] - e.grab[1];
+    let mut offset = offset_for(&cfg, id, (r.w, r.h), (x, y), (sw, sh));
     if cfg.snap {
-        x = snap_to(cfg.grid, x);
-        y = snap_to(cfg.grid, y);
+        let base = Config::default().module(id).offset;
+        offset = snap_offset(cfg.grid, base, offset);
     }
-    let offset = offset_for(&cfg, id, (r.w, r.h), (x, y), (sw, sh));
     edit_config(|c| {
         let m = c.module_mut(id);
         m.offset = offset;
@@ -6422,6 +6432,26 @@ mod tests {
             cfg.module(ModuleId::Info).offset,
             Config::default().module(ModuleId::Info).offset
         );
+    }
+
+    #[test]
+    fn snapping_keeps_the_default_offset_reachable() {
+        // The default offsets are not multiples of the default grid: a drag
+        // back to where a module started must land on the exact default, not
+        // on the nearest point of the absolute grid.
+        let base = [3.0, -41.0];
+        assert_eq!(snap_offset(8, base, base), base);
+        assert_eq!(snap_offset(8, base, [base[0] + 2.0, base[1] - 3.0]), base);
+        assert_eq!(
+            snap_offset(8, base, [base[0] + 9.0, base[1] - 7.0]),
+            [base[0] + 8.0, base[1] - 8.0]
+        );
+        assert_eq!(
+            snap_offset(8, base, [base[0] + 16.0, base[1]]),
+            [19.0, -41.0]
+        );
+        // Vanilla widgets start at zero, so their absolute grid is unchanged.
+        assert_eq!(snap_offset(8, [0.0, 0.0], [3.0, 4.0]), [0.0, 8.0]);
     }
 
     #[test]
