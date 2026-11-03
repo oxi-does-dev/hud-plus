@@ -1,0 +1,13 @@
+[package]
+name = "horizon-mod-hud-plus"
+version = "3.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "HUD+: an ultimate, fully configurable HUD for Horizon — AppleSkin, effect timers, inventory, armour, coordinates, keystrokes, performance and more, with a drag-and-drop layout editor."
+
+[lib]
+path = "mixins/hud_plus/runtime.rs"
+
+[dependencies]
+serde_json = "1"
