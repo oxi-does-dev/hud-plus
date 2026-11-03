@@ -1453,7 +1453,6 @@ pub enum VanillaId {
     ContextualBar,
     PlayerHealth,
     SelectedItemName,
-    SleepOverlay,
     OverlayMessage,
     Title,
     Scoreboard,
@@ -1464,7 +1463,7 @@ pub enum VanillaId {
 }
 
 impl VanillaId {
-    pub const ALL: [VanillaId; 15] = [
+    pub const ALL: [VanillaId; 14] = [
         VanillaId::Crosshair,
         VanillaId::Hotbar,
         VanillaId::Effects,
@@ -1479,7 +1478,6 @@ impl VanillaId {
         VanillaId::Scoreboard,
         VanillaId::Chat,
         VanillaId::TabList,
-        VanillaId::SleepOverlay,
     ];
 
     pub fn key(self) -> &'static str {
@@ -1491,7 +1489,6 @@ impl VanillaId {
             VanillaId::ContextualBar => "contextual_bar",
             VanillaId::PlayerHealth => "player_health",
             VanillaId::SelectedItemName => "selected_item_name",
-            VanillaId::SleepOverlay => "sleep_overlay",
             VanillaId::OverlayMessage => "overlay_message",
             VanillaId::Title => "title",
             VanillaId::Scoreboard => "scoreboard",
@@ -1511,7 +1508,6 @@ impl VanillaId {
             VanillaId::ContextualBar => "XP / locator bar",
             VanillaId::PlayerHealth => "Health & hunger",
             VanillaId::SelectedItemName => "Item name",
-            VanillaId::SleepOverlay => "Sleep overlay",
             VanillaId::OverlayMessage => "Action bar",
             VanillaId::Title => "Title",
             VanillaId::Scoreboard => "Scoreboard",
@@ -1532,7 +1528,6 @@ impl VanillaId {
             VanillaId::ContextualBar => "minecraft:contextual_info_bar",
             VanillaId::PlayerHealth => "minecraft:player_health",
             VanillaId::SelectedItemName => "minecraft:selected_item_name",
-            VanillaId::SleepOverlay => "minecraft:sleep_overlay",
             VanillaId::OverlayMessage => "minecraft:overlay_message",
             VanillaId::Title => "minecraft:title",
             VanillaId::Scoreboard => "minecraft:scoreboard_sidebar",
@@ -1550,10 +1545,7 @@ impl VanillaId {
     /// The point of the widget that scaling keeps in place.
     pub fn pivot(self) -> (f32, f32) {
         match self {
-            VanillaId::Crosshair
-            | VanillaId::Hotbar
-            | VanillaId::SleepOverlay
-            | VanillaId::Title => (0.5, 0.5),
+            VanillaId::Crosshair | VanillaId::Hotbar | VanillaId::Title => (0.5, 0.5),
             VanillaId::Effects | VanillaId::Scoreboard => (1.0, 0.0),
             VanillaId::TabList => (0.5, 0.0),
             VanillaId::Chat => (0.0, 1.0),
@@ -1574,7 +1566,6 @@ impl VanillaId {
             // `Hud.extractSelectedItemName`: centred, `h - max(barHeight, 59)`.
             VanillaId::SelectedItemName => Rect::new(w / 2.0 - 110.0, h - 61.0, 220.0, 14.0),
             VanillaId::VehicleHealth => Rect::new(w / 2.0 - 91.0, h - 60.0, 182.0, 10.0),
-            VanillaId::SleepOverlay => Rect::new(0.0, 0.0, w, h),
             VanillaId::OverlayMessage => Rect::new(w / 2.0 - 110.0, h - 60.0, 220.0, 12.0),
             VanillaId::Title => Rect::new(w / 2.0 - 130.0, h / 2.0 - 62.0, 260.0, 84.0),
             VanillaId::Scoreboard => Rect::new(w - 160.0, 16.0, 156.0, 140.0),

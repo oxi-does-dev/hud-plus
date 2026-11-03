@@ -18,7 +18,7 @@ game; no files need editing by hand.
 | Player vitals | Health, absorption, armour, food, air and experience as labelled rows with bars |
 | Held items | The held and offhand item, stack counts, arrows and totems, with durability |
 | Tooltips | Food and saturation on food items; durability, max stack and the item id while sneaking |
-| Vanilla HUD | The game's own widgets — crosshair, hotbar, health and hunger, XP bar, effect icons, boss bars, item name, action bar, title, subtitles, scoreboard, chat, player list, mount health and the sleep overlay — each moved and scaled by HUD+ |
+| Vanilla HUD | The game's own widgets — crosshair, hotbar, health and hunger, XP bar, effect icons, boss bars, item name, action bar, title, subtitles, scoreboard, chat, player list and mount health — each moved and scaled by HUD+ (the full-screen sleep overlay is not listed: there is nothing to move in it) |
 
 ## Views
 
