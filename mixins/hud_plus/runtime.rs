@@ -5167,6 +5167,7 @@ fn all_setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     rows
 }
 
+#[allow(dead_code)] // Kept for the tests and for callers that want the full list.
 pub fn setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     all_setting_rows()
 }
@@ -5209,6 +5210,7 @@ pub struct SettingLine {
     pub value: String,
 }
 
+#[allow(dead_code)] // The root page is what the screen opens on.
 pub fn setting_lines(cfg: &Config) -> Vec<SettingLine> {
     setting_lines_for(cfg, SettingsPage::Root)
 }
