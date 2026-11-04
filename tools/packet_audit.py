@@ -401,6 +401,38 @@ def compare(args):
         gate=False,
     )
 
+    # The same course walked in the same direction: the start is exact, the
+    # end and the path length may drift by a frame or a fall.
+    def trajectory(entries):
+        points = []
+        for e in entries:
+            data = payload(e)
+            if e["name"] in ("move_player_pos", "move_player_pos_rot") and len(data) >= 24:
+                points.append(struct.unpack(">ddd", data[:24]))
+        if not points:
+            return None
+        path = sum(math.dist(a, b) for a, b in zip(points, points[1:]))
+        return points[0], points[-1], path
+
+    a_traj = trajectory(stock_c2s)
+    b_traj = trajectory(hud_c2s)
+    check(
+        "trajectory",
+        a_traj
+        and b_traj
+        and math.dist(a_traj[0], b_traj[0]) <= 0.01
+        and math.hypot(a_traj[1][0] - b_traj[1][0], a_traj[1][2] - b_traj[1][2]) <= 3.0
+        and abs(a_traj[2] - b_traj[2]) <= max(1.5, 0.2 * a_traj[2]),
+        {
+            "stock": [tuple(round(v, 2) for v in a_traj[0]), tuple(round(v, 2) for v in a_traj[1]), round(a_traj[2], 2)]
+            if a_traj
+            else None,
+            "hud": [tuple(round(v, 2) for v in b_traj[0]), tuple(round(v, 2) for v in b_traj[1]), round(b_traj[2], 2)]
+            if b_traj
+            else None,
+        },
+    )
+
     # Input transitions: the same set of key states, allowing one repeated
     # packet from a frame boundary.
     a_input = [payload(e)[0] for e in stock_c2s if e["name"] == "player_input"]
