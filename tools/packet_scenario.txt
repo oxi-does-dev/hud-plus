@@ -1,0 +1,24 @@
+sleep 2
+mouse-move 100 20
+sleep 0.2
+move forward 1
+move forward 1 --sprint
+move forward 0.5 --sprint --jump
+move left 0.5 --sneak
+hold space 0.3
+mouse-move 300 -40
+move backward 0.7
+key e tap
+sleep 0.4
+click-slot 9
+sleep 0.2
+click-slot 10 right
+sleep 0.2
+key e tap
+sleep 0.3
+chat packet-audit
+sleep 0.5
+command time set day
+sleep 0.5
+key q tap
+sleep 0.5

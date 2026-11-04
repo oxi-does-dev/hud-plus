@@ -108,6 +108,37 @@ the same traffic. Some servers also restrict what a HUD may show by their rules
 — coordinates, for one. Every module has a switch under `N`, and the master
 switch on the first row turns the whole HUD off, without leaving the world.
 
+## Packet audit
+
+The "draws only" claim is checked on the wire. `tools/packet_audit.py` starts a
+fresh dedicated server behind a decoding proxy, joins it first with a stock
+Horizon client and then with the HUD+ build, runs one scripted session (walk,
+sprint, jump, sneak, inventory clicks, chat, a command, dropping an item and
+two attacks), and records every packet in both directions. `compare` requires
+the handshake, login, configuration, `client_information`, `custom_payload`,
+every action packet and the 20 Hz tick rate to match; `audit` adds the
+anticheat's view (timer, horizontal speed, falls, attacks covered by swings,
+one target per tick, no mod id in the traffic). Movement packet counts and
+flag mixes are reported, not gated: a key change on a frame boundary moves
+them by a packet or two in either client.
+
+It needs a Horizon build and a prepared server directory (`server.toml` with
+`whitelist = false`); a capture deletes that directory's world and makes a
+new one.
+
+```sh
+python3 tools/packet_audit.py capture \
+  --client /path/to/horizon-client.orig \
+  --server /path/to/horizon-server --ctl /path/to/horizon-ctl \
+  --ids /path/to/horizon/crates/horizon-protocol/src/ids.rs \
+  --server-dir /path/to/server --out stock.jsonl
+python3 tools/packet_audit.py capture ... \
+  --client /path/to/horizon-client --out hud.jsonl
+python3 tools/packet_audit.py compare stock.jsonl hud.jsonl --json report.json
+python3 tools/packet_audit.py audit hud.jsonl
+python3 tools/packet_audit.py matrix --stock stock*.jsonl --hud hud*.jsonl
+```
+
 ## Responsibility and support
 
 HUD+ is a free, unofficial, client-side mod, provided under the MIT licence
