@@ -223,7 +223,11 @@ def capture(args):
             proxy.wait(5)
         except subprocess.TimeoutExpired:
             proxy.kill()
-    subprocess.run([str(server), "--dir", str(server_dir), "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [str(server), "--dir", str(server_dir), "stop"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     print(json.dumps({"capture": str(args.out), "packets": sum(1 for _ in open(args.out))}))
 
 
