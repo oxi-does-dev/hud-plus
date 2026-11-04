@@ -5072,19 +5072,19 @@ fn all_setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     rows.push((
         Toggle(F::EffectsHideVanilla),
         "Hide vanilla icons",
-        "Effects",
+        "Effect timers",
     ));
-    rows.push((Toggle(F::EffectsIcons), "Icons", "Effects"));
-    rows.push((Toggle(F::EffectsNames), "Names", "Effects"));
-    rows.push((Toggle(F::EffectsAmplifier), "Amplifier", "Effects"));
-    rows.push((Choice(P::EffectTime), "Time format", "Effects"));
-    rows.push((Choice(P::EffectSort), "Sort", "Effects"));
-    rows.push((Amount(N::EffectsWarn), "Warning time", "Effects"));
-    rows.push((Amount(N::EffectsRows), "Max rows", "Effects"));
-    rows.push((Toggle(F::EffectsGroup), "Group by benefit", "Effects"));
-    rows.push((Toggle(F::EffectsAmbient), "Ambient marker", "Effects"));
-    rows.push((Toggle(F::EffectsExpiring), "Only expiring", "Effects"));
-    rows.push((Toggle(F::EffectsHorizontal), "Horizontal", "Effects"));
+    rows.push((Toggle(F::EffectsIcons), "Icons", "Effect timers"));
+    rows.push((Toggle(F::EffectsNames), "Names", "Effect timers"));
+    rows.push((Toggle(F::EffectsAmplifier), "Amplifier", "Effect timers"));
+    rows.push((Choice(P::EffectTime), "Time format", "Effect timers"));
+    rows.push((Choice(P::EffectSort), "Sort", "Effect timers"));
+    rows.push((Amount(N::EffectsWarn), "Warning time", "Effect timers"));
+    rows.push((Amount(N::EffectsRows), "Max rows", "Effect timers"));
+    rows.push((Toggle(F::EffectsGroup), "Group by benefit", "Effect timers"));
+    rows.push((Toggle(F::EffectsAmbient), "Ambient marker", "Effect timers"));
+    rows.push((Toggle(F::EffectsExpiring), "Only expiring", "Effect timers"));
+    rows.push((Toggle(F::EffectsHorizontal), "Horizontal", "Effect timers"));
 
     module(&mut rows, M::Inventory);
     rows.push((Amount(N::InvColumns), "Columns", "Inventory"));
@@ -6605,13 +6605,34 @@ mod tests {
             assert_eq!(row.value, expected);
             assert!(row.text == id.title());
         }
+        // Every page carries the six module rows plus at least one option
+        // that belongs to that module alone.
+        for id in ModuleId::ALL {
+            let page = setting_lines_for(&cfg, SettingsPage::Module(id));
+            assert!(page[0].header, "{} has no header", id.title());
+            assert_eq!(page[0].text, "Modules");
+            assert_eq!(page[1].action, Some(Action::OpenSettings));
+            assert_eq!(page[1].text, "Back to modules");
+            assert!(
+                page.len() > 7,
+                "{} has only {} rows",
+                id.title(),
+                page.len()
+            );
+        }
         let page = setting_lines_for(&cfg, SettingsPage::Module(ModuleId::Coords));
-        assert!(page[0].header);
-        assert_eq!(page[0].text, "Modules");
-        assert_eq!(page[1].action, Some(Action::OpenSettings));
-        assert_eq!(page[1].text, "Back to modules");
         assert!(page.iter().any(|l| l.text == "Facing"));
         assert!(!page.iter().any(|l| l.text == "Saturation"));
+        assert!(
+            setting_lines_for(&cfg, SettingsPage::Module(ModuleId::Effects))
+                .iter()
+                .any(|l| l.text == "Icons")
+        );
+        assert!(
+            setting_lines_for(&cfg, SettingsPage::Module(ModuleId::Armor))
+                .iter()
+                .any(|l| l.text == "Percent")
+        );
         let coords = setting_lines_for(&cfg, SettingsPage::Module(ModuleId::AppleSkin));
         assert!(coords.iter().any(|l| l.text == "Saturation"));
         assert!(!coords.iter().any(|l| l.text == "Facing"));
