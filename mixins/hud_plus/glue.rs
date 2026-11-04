@@ -550,6 +550,10 @@ pub(super) fn key(game: &mut Game<'_>, key: &str, pressed: bool) -> bool {
     }
     let settings = cfg.settings_hotkey.key();
     if !settings.is_empty() && key == settings {
+        m::edit_editor(|e| {
+            e.settings_page = m::SettingsPage::Root;
+            e.scroll = 0;
+        });
         return open(game, m::ScreenMode::Settings);
     }
     if key == "key.keyboard.v" && cfg.vanilla.enabled {
@@ -944,6 +948,10 @@ pub(super) fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
             }
         }
         "settings" => {
+            m::edit_editor(|e| {
+                e.settings_page = m::SettingsPage::Root;
+                e.scroll = 0;
+            });
             if open(game, m::ScreenMode::Settings) {
                 game.native_chat("HUD+ settings");
             } else {

@@ -2678,6 +2678,14 @@ pub enum EditorPage {
     Vanilla,
 }
 
+/// Which page of `N` is open: the list of modules, or one module's settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SettingsPage {
+    #[default]
+    Root,
+    Module(ModuleId),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EditorState {
     pub selected: Option<ModuleId>,
@@ -2687,6 +2695,7 @@ pub struct EditorState {
     pub grab: [f32; 2],
     pub scroll: i32,
     pub page: EditorPage,
+    pub settings_page: SettingsPage,
 }
 
 impl Default for EditorState {
@@ -2699,6 +2708,7 @@ impl Default for EditorState {
             grab: [0.0, 0.0],
             scroll: 0,
             page: EditorPage::Mods,
+            settings_page: SettingsPage::Root,
         }
     }
 }
@@ -2706,7 +2716,7 @@ impl Default for EditorState {
 thread_local! {
     static CONFIG: std::cell::Cell<Option<Config>> = const { std::cell::Cell::new(None) };
     static MODE: std::cell::Cell<ScreenMode> = const { std::cell::Cell::new(ScreenMode::Closed) };
-    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods }) };
+    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods, settings_page: SettingsPage::Root }) };
     static RECTS: std::cell::RefCell<Vec<(ModuleId, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
     static PENDING: std::cell::Cell<Option<ScreenMode>> = const { std::cell::Cell::new(None) };
 }
@@ -3630,6 +3640,14 @@ fn saturation_outlines(
     }
 }
 
+/// The right edge of the hunger icons, which must not move when the numbers
+/// make the module's box wider than the bar.
+fn apple_skin_icon_right(m: &ModuleBox, bar_scale: f32, pad: f32, screen: (f32, f32)) -> f32 {
+    let bar_w = HUNGER_BAR * bar_scale + 2.0 * pad;
+    let (x, _) = m.anchor.place((bar_w, 0.0), m.offset, screen);
+    x + bar_w - pad
+}
+
 fn size_apple_skin(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
     let c = &cfg.apple_skin.effective();
     let m = &c.module;
@@ -3656,7 +3674,15 @@ fn draw_apple_skin(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col
     let step = 8.0 * bar_scale;
     // The icons sit on the box's bottom line, so the numbers can grow above
     // them without moving them off the vanilla bar.
-    let right = r.right() - pad;
+    let pinned = cfg.vanilla.enabled
+        && cfg.vanilla.get(VanillaId::PlayerHealth).on
+        && (cfg.vanilla.get(VanillaId::PlayerHealth).offset != [0.0, 0.0]
+            || (cfg.vanilla.get(VanillaId::PlayerHealth).scale - 1.0).abs() >= 0.001);
+    let right = if pinned {
+        r.right() - pad
+    } else {
+        apple_skin_icon_right(m, bar_scale, pad, p.screen())
+    };
     let y = r.bottom() - pad - icon;
     let hunger = s.effects.iter().any(|e| e.id == "hunger");
     // AppleSkin draws rotten flesh's preview with the hunger textures.
@@ -3715,13 +3741,17 @@ fn draw_apple_skin(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col
     if !lines.is_empty() {
         let lh = line_h(m);
         let low = s.food <= c.low_threshold;
+        // Centre the numbers over the icons: the box grows to fit a long
+        // line, and left-aligning would push the text off the bar's centre.
+        let inner = r.w - 2.0 * pad;
         let mut ty = y - 2.0 - lh * lines.len() as f32;
         for (line, _) in &lines {
+            let x = r.x + pad + (inner - p.width(line) * m.scale).max(0.0) / 2.0;
             txt(
                 p,
                 cfg,
                 line,
-                r.x + pad,
+                x,
                 ty,
                 if low { col.bad } else { col.text },
                 m.scale,
@@ -4871,6 +4901,8 @@ pub enum Action {
     ResetAll,
     OpenLayout,
     OpenVanilla,
+    OpenSettings,
+    OpenModuleSettings(ModuleId),
     CloseScreen,
 }
 
@@ -4903,6 +4935,9 @@ impl Action {
                 }
             }
             Action::Choice(p) => p.label(c),
+            Action::OpenModuleSettings(id) => {
+                (if c.module(id).enabled { "ON" } else { "OFF" }).into()
+            }
             _ => String::new(),
         }
     }
@@ -4967,6 +5002,20 @@ impl Action {
                 set_pending(ScreenMode::Layout);
                 false
             }
+            Action::OpenSettings => {
+                edit_editor(|e| {
+                    e.settings_page = SettingsPage::Root;
+                    e.scroll = 0;
+                });
+                false
+            }
+            Action::OpenModuleSettings(id) => {
+                edit_editor(|e| {
+                    e.settings_page = SettingsPage::Module(id);
+                    e.scroll = 0;
+                });
+                false
+            }
             Action::CloseScreen => {
                 set_pending(ScreenMode::Closed);
                 false
@@ -4975,7 +5024,7 @@ impl Action {
     }
 }
 
-pub fn setting_rows() -> Vec<(Action, &'static str, &'static str)> {
+fn all_setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     use Action::*;
     use Flag as F;
     use ModField as MF;
@@ -5118,6 +5167,40 @@ pub fn setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     rows
 }
 
+pub fn setting_rows() -> Vec<(Action, &'static str, &'static str)> {
+    all_setting_rows()
+}
+
+/// The rows of one settings page: the module list, or one module's own page.
+pub fn setting_rows_for(page: SettingsPage) -> Vec<(Action, &'static str, &'static str)> {
+    let all = all_setting_rows();
+    let mut rows = Vec::new();
+    match page {
+        SettingsPage::Root => {
+            for row in all.iter().filter(|(_, _, sec)| *sec == "General") {
+                rows.push(*row);
+            }
+            for id in ModuleId::ALL {
+                rows.push((Action::OpenModuleSettings(id), id.title(), "Modules"));
+            }
+            for row in all
+                .iter()
+                .filter(|(_, _, sec)| *sec == "Vanilla HUD" || *sec == "Tooltips")
+            {
+                rows.push(*row);
+            }
+        }
+        SettingsPage::Module(id) => {
+            rows.push((Action::OpenSettings, "Back to modules", "Modules"));
+            let title = id.title();
+            for row in all.iter().filter(|(_, _, sec)| *sec == title) {
+                rows.push(*row);
+            }
+        }
+    }
+    rows
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SettingLine {
     pub header: bool,
@@ -5127,9 +5210,13 @@ pub struct SettingLine {
 }
 
 pub fn setting_lines(cfg: &Config) -> Vec<SettingLine> {
+    setting_lines_for(cfg, SettingsPage::Root)
+}
+
+pub fn setting_lines_for(cfg: &Config, page: SettingsPage) -> Vec<SettingLine> {
     let mut out = Vec::new();
     let mut section = "";
-    for (action, label, sec) in setting_rows() {
+    for (action, label, sec) in setting_rows_for(page) {
         if sec != section {
             out.push(SettingLine {
                 header: true,
@@ -5189,7 +5276,8 @@ pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32
     let col = cfg.theme.colours(cfg.opacity);
     let (sw, sh) = p.screen();
     p.fill(Rect::new(0.0, 0.0, sw, sh), 0x9900_0000);
-    let lines = setting_lines(cfg);
+    let page = editor().settings_page;
+    let lines = setting_lines_for(cfg, page);
     let view = settings_view((sw, sh), lines.len(), scroll);
     rounded_fill(p, view.panel, with_alpha(col.header, 248));
     rounded_border(p, view.panel, with_alpha(col.border, 170));
@@ -5203,10 +5291,14 @@ pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32
         ),
         with_alpha(col.accent, 200),
     );
+    let title = match page {
+        SettingsPage::Root => "HUD+ Settings".to_string(),
+        SettingsPage::Module(id) => format!("HUD+ Settings · {}", id.title()),
+    };
     txt(
         p,
         cfg,
-        "HUD+ Settings",
+        &title,
         view.panel.x + 8.0,
         view.panel.y + 6.0,
         col.accent,
@@ -5331,7 +5423,7 @@ pub fn settings_click(
     at: [f32; 2],
     button: i32,
 ) -> bool {
-    let lines = setting_lines(cfg);
+    let lines = setting_lines_for(cfg, editor().settings_page);
     let view = settings_view(screen, lines.len(), scroll);
     if !view.list.contains(at) {
         return false;
@@ -5364,7 +5456,7 @@ pub fn settings_click(
 
 /// Scrolls the settings list by `steps`, kept within the list.
 pub fn settings_scroll(screen: (f32, f32), scroll: i32, steps: f32, cfg: &Config) -> i32 {
-    let lines = setting_lines(cfg).len();
+    let lines = setting_lines_for(cfg, editor().settings_page).len();
     let view = settings_view(screen, lines, 0);
     let max_first = lines.saturating_sub(view.visible) as i32;
     (scroll - steps.round() as i32).clamp(0, max_first)
@@ -6127,6 +6219,26 @@ mod tests {
     }
 
     #[test]
+    fn appleskin_icons_stay_on_the_bar_when_numbers_widen_the_box() {
+        let p = MockPainter;
+        let s = snapshot();
+        let plain = Config::default();
+        let mut numbers = Config::default();
+        numbers.apple_skin.show_numbers = true;
+        numbers.apple_skin.show_saturation = true;
+        let small = size_apple_skin(&p, &s, &plain);
+        let wide = size_apple_skin(&p, &s, &numbers);
+        assert!(wide.0 > small.0);
+        let m = numbers.apple_skin.module;
+        let scale = numbers.apple_skin.module.scale * apple_skin_scale(&numbers);
+        let pad = pad(&m);
+        assert_eq!(
+            apple_skin_icon_right(&plain.apple_skin.module, scale, pad, p.screen()),
+            apple_skin_icon_right(&m, scale, pad, p.screen())
+        );
+    }
+
+    #[test]
     fn the_flash_pulses_like_appleskins() {
         assert_eq!(flash_alpha(0), 0.0);
         assert!((flash_alpha(4) - 0.5).abs() < 0.001);
@@ -6467,11 +6579,40 @@ mod tests {
         let lines = setting_lines(&Config::default());
         assert!(lines[0].header);
         assert_eq!(lines[0].text, "General");
-        assert!(lines.iter().any(|l| l.header && l.text == "Coordinates"));
-        assert!(lines.iter().any(|l| !l.header && l.text == "Scale"));
+        assert!(lines.iter().any(|l| l.header && l.text == "Modules"));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.action == Some(Action::OpenModuleSettings(ModuleId::Coords)))
+        );
         let view = settings_view((320.0, 200.0), lines.len(), 0);
         assert!(view.visible > 0);
         assert_eq!(view.first, 0);
+    }
+
+    #[test]
+    fn every_module_has_its_own_settings_page() {
+        let cfg = Config::default();
+        let root = setting_lines(&cfg);
+        for id in ModuleId::ALL {
+            let row = root
+                .iter()
+                .find(|l| l.action == Some(Action::OpenModuleSettings(id)))
+                .unwrap_or_else(|| panic!("no row for {}", id.title()));
+            let expected = if cfg.module(id).enabled { "ON" } else { "OFF" };
+            assert_eq!(row.value, expected);
+            assert!(row.text == id.title());
+        }
+        let page = setting_lines_for(&cfg, SettingsPage::Module(ModuleId::Coords));
+        assert!(page[0].header);
+        assert_eq!(page[0].text, "Modules");
+        assert_eq!(page[1].action, Some(Action::OpenSettings));
+        assert_eq!(page[1].text, "Back to modules");
+        assert!(page.iter().any(|l| l.text == "Facing"));
+        assert!(!page.iter().any(|l| l.text == "Saturation"));
+        let coords = setting_lines_for(&cfg, SettingsPage::Module(ModuleId::AppleSkin));
+        assert!(coords.iter().any(|l| l.text == "Saturation"));
+        assert!(!coords.iter().any(|l| l.text == "Facing"));
     }
 
     #[test]

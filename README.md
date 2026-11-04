@@ -66,11 +66,14 @@ contrast, Amber) set everything at once.
   click to reset it, `Space` to switch its control on or off and `R` to reset
   every widget. The real HUD stays visible while you edit, so what you see is
   what the game draws.
-- `N` opens settings: a scrollable list of every option, with sections. Each
-  module starts with its `View` row, right under `Enabled`. Click a row to
-  change it; right-click goes back. The first row is the master switch,
-  so the whole HUD can be turned off without leaving the world. Its `Vanilla
-  HUD` section turns the widget control on or off and opens the vanilla page.
+- `N` opens settings. The first page holds the global options and a `Modules`
+  list: every module has its own row with its on/off state, and clicking it
+  opens a page with only that module's settings (`View`, `Anchor`, `Scale`,
+  `Background`, `Border` and everything specific to it). `Back to modules`
+  returns to the list. Click a row to change it; right-click goes back. The
+  first row is the master switch, so the whole HUD can be turned off without
+  leaving the world. The `Vanilla HUD` section turns the widget control on or
+  off and opens the vanilla page.
 - `/hudplus` shows the command help. `/hudplus on|off`, `layout`, `settings`,
   `reset`, `profile <name>` and `theme <name>` also work.
 - Options > Mods lists HUD+ and has buttons for on/off, theme, profile and a
