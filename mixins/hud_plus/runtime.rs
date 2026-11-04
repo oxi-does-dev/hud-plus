@@ -1569,7 +1569,13 @@ impl VanillaId {
             VanillaId::OverlayMessage => Rect::new(w / 2.0 - 110.0, h - 60.0, 220.0, 12.0),
             VanillaId::Title => Rect::new(w / 2.0 - 130.0, h / 2.0 - 62.0, 260.0, 84.0),
             VanillaId::Scoreboard => Rect::new(w - 160.0, 16.0, 156.0, 140.0),
-            VanillaId::Subtitle => Rect::new(w / 2.0 - 110.0, h / 2.0 + 24.0, 220.0, 12.0),
+            VanillaId::Subtitle => {
+                // `SubtitleOverlay` right-aligns the captions above the hotbar,
+                // not at the middle of the screen. The box follows the real
+                // place so the editor's outline sits on the captions.
+                let caption_w = 240.0_f32.min(w - 8.0);
+                Rect::new(w - caption_w - 1.0, h - 41.0, caption_w, 12.0)
+            }
             VanillaId::Chat => Rect::new(0.0, h - 140.0, 320.0, 140.0),
             VanillaId::TabList => Rect::new(w / 2.0 - 160.0, 6.0, 320.0, 140.0),
         }
@@ -2678,14 +2684,6 @@ pub enum EditorPage {
     Vanilla,
 }
 
-/// Which page of `N` is open: the list of modules, or one module's settings.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SettingsPage {
-    #[default]
-    Root,
-    Module(ModuleId),
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EditorState {
     pub selected: Option<ModuleId>,
@@ -2695,7 +2693,6 @@ pub struct EditorState {
     pub grab: [f32; 2],
     pub scroll: i32,
     pub page: EditorPage,
-    pub settings_page: SettingsPage,
 }
 
 impl Default for EditorState {
@@ -2708,39 +2705,42 @@ impl Default for EditorState {
             grab: [0.0, 0.0],
             scroll: 0,
             page: EditorPage::Mods,
-            settings_page: SettingsPage::Root,
         }
     }
 }
 
 thread_local! {
-    static CONFIG: std::cell::Cell<Option<Config>> = const { std::cell::Cell::new(None) };
     static MODE: std::cell::Cell<ScreenMode> = const { std::cell::Cell::new(ScreenMode::Closed) };
-    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods, settings_page: SettingsPage::Root }) };
+    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods }) };
     static RECTS: std::cell::RefCell<Vec<(ModuleId, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
     static PENDING: std::cell::Cell<Option<ScreenMode>> = const { std::cell::Cell::new(None) };
 }
 
 /// The configuration, read through `load` the first time and kept after.
+/// Shared by every thread: a chat command reaches the mod on the server
+/// thread while the HUD is drawn on the render thread, and both see the same
+/// values.
+static CONFIG: std::sync::Mutex<Option<Config>> = std::sync::Mutex::new(None);
+
 pub fn config(load: impl FnOnce() -> Config) -> Config {
-    CONFIG.with(|c| {
-        if let Some(cfg) = c.get() {
-            return cfg;
-        }
-        let cfg = load();
-        c.set(Some(cfg));
-        cfg
-    })
+    let mut slot = CONFIG.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(cfg) = *slot {
+        return cfg;
+    }
+    let cfg = load();
+    *slot = Some(cfg);
+    cfg
 }
 
 pub fn set_config(cfg: Config) {
-    CONFIG.with(|c| c.set(Some(cfg)));
+    *CONFIG.lock().unwrap_or_else(|e| e.into_inner()) = Some(cfg);
 }
 
 /// Changes the configuration and marks the profile custom. False when the
 /// change was a no-op.
 pub fn edit_config(change: impl FnOnce(&mut Config) -> bool) -> bool {
-    let mut cfg = config(Config::default);
+    let mut slot = CONFIG.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cfg = (*slot).unwrap_or_default();
     let mut next = cfg;
     let changed = change(&mut next);
     if changed {
@@ -2748,7 +2748,7 @@ pub fn edit_config(change: impl FnOnce(&mut Config) -> bool) -> bool {
             next.profile = Profile::Custom;
         }
         cfg = next;
-        set_config(cfg);
+        *slot = Some(cfg);
     }
     changed
 }
@@ -4901,8 +4901,6 @@ pub enum Action {
     ResetAll,
     OpenLayout,
     OpenVanilla,
-    OpenSettings,
-    OpenModuleSettings(ModuleId),
     CloseScreen,
 }
 
@@ -4935,9 +4933,6 @@ impl Action {
                 }
             }
             Action::Choice(p) => p.label(c),
-            Action::OpenModuleSettings(id) => {
-                (if c.module(id).enabled { "ON" } else { "OFF" }).into()
-            }
             _ => String::new(),
         }
     }
@@ -5000,20 +4995,6 @@ impl Action {
                     e.selected_vanilla = e.selected_vanilla.or(Some(VanillaId::Hotbar));
                 });
                 set_pending(ScreenMode::Layout);
-                false
-            }
-            Action::OpenSettings => {
-                edit_editor(|e| {
-                    e.settings_page = SettingsPage::Root;
-                    e.scroll = 0;
-                });
-                false
-            }
-            Action::OpenModuleSettings(id) => {
-                edit_editor(|e| {
-                    e.settings_page = SettingsPage::Module(id);
-                    e.scroll = 0;
-                });
                 false
             }
             Action::CloseScreen => {
@@ -5172,36 +5153,6 @@ pub fn setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     all_setting_rows()
 }
 
-/// The rows of one settings page: the module list, or one module's own page.
-pub fn setting_rows_for(page: SettingsPage) -> Vec<(Action, &'static str, &'static str)> {
-    let all = all_setting_rows();
-    let mut rows = Vec::new();
-    match page {
-        SettingsPage::Root => {
-            for row in all.iter().filter(|(_, _, sec)| *sec == "General") {
-                rows.push(*row);
-            }
-            for id in ModuleId::ALL {
-                rows.push((Action::OpenModuleSettings(id), id.title(), "Modules"));
-            }
-            for row in all
-                .iter()
-                .filter(|(_, _, sec)| *sec == "Vanilla HUD" || *sec == "Tooltips")
-            {
-                rows.push(*row);
-            }
-        }
-        SettingsPage::Module(id) => {
-            rows.push((Action::OpenSettings, "Back to modules", "Modules"));
-            let title = id.title();
-            for row in all.iter().filter(|(_, _, sec)| *sec == title) {
-                rows.push(*row);
-            }
-        }
-    }
-    rows
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct SettingLine {
     pub header: bool,
@@ -5210,15 +5161,10 @@ pub struct SettingLine {
     pub value: String,
 }
 
-#[allow(dead_code)] // The root page is what the screen opens on.
 pub fn setting_lines(cfg: &Config) -> Vec<SettingLine> {
-    setting_lines_for(cfg, SettingsPage::Root)
-}
-
-pub fn setting_lines_for(cfg: &Config, page: SettingsPage) -> Vec<SettingLine> {
     let mut out = Vec::new();
     let mut section = "";
-    for (action, label, sec) in setting_rows_for(page) {
+    for (action, label, sec) in setting_rows() {
         if sec != section {
             out.push(SettingLine {
                 header: true,
@@ -5247,27 +5193,33 @@ pub struct SettingsView {
     pub lines: usize,
 }
 
+/// Settings rows are deliberately tighter than the layout editor's list: the
+/// whole configuration lives in one panel, and the world behind it stays
+/// visible.
+const SETTINGS_ROW_H: f32 = 12.0;
+
 pub fn settings_view(screen: (f32, f32), lines: usize, scroll: i32) -> SettingsView {
     let (sw, sh) = screen;
-    let w = (sw - 16.0).clamp(220.0, 460.0);
-    let h = (sh - 16.0).clamp(140.0, 320.0);
-    let panel = Rect::new((sw - w) / 2.0, (sh - h) / 2.0, w, h);
-    let title_h = 22.0;
-    let footer_h = 16.0;
+    // A compact panel on the right: no full-screen veil, so the game stays
+    // readable while a value is changed.
+    let w = (sw * 0.46).clamp(200.0, 330.0);
+    let h = (sh - 12.0).max(96.0);
+    let panel = Rect::new(sw - w - 6.0, 6.0, w, h);
+    let title_h = 18.0;
+    let footer_h = 18.0;
     let list = Rect::new(
         panel.x + 6.0,
         panel.y + title_h,
         panel.w - 12.0,
-        panel.h - title_h - footer_h - 4.0,
+        (panel.h - title_h - footer_h).max(SETTINGS_ROW_H),
     );
-    let row_h = 14.0;
-    let visible = (list.h / row_h).floor().max(1.0) as usize;
+    let visible = (list.h / SETTINGS_ROW_H).floor().max(1.0) as usize;
     let max_first = lines.saturating_sub(visible);
     let first = (scroll.max(0) as usize).min(max_first);
     SettingsView {
         panel,
         list,
-        row_h,
+        row_h: SETTINGS_ROW_H,
         first,
         visible,
         lines,
@@ -5277,13 +5229,11 @@ pub fn settings_view(screen: (f32, f32), lines: usize, scroll: i32) -> SettingsV
 pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32; 2]) {
     let col = cfg.theme.colours(cfg.opacity);
     let (sw, sh) = p.screen();
-    p.fill(Rect::new(0.0, 0.0, sw, sh), 0x9900_0000);
-    let page = editor().settings_page;
-    let lines = setting_lines_for(cfg, page);
+    let lines = setting_lines(cfg);
     let view = settings_view((sw, sh), lines.len(), scroll);
-    rounded_fill(p, view.panel, with_alpha(col.header, 248));
-    rounded_border(p, view.panel, with_alpha(col.border, 170));
-    // An accent rule under the title, the one strong colour on the screen.
+    // Only the panel is painted: the world keeps its colours and brightness.
+    rounded_fill(p, view.panel, with_alpha(col.header, 228));
+    rounded_border(p, view.panel, with_alpha(col.border, 150));
     p.fill(
         Rect::new(
             view.panel.x + 2.0,
@@ -5291,106 +5241,85 @@ pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32
             view.panel.w - 4.0,
             2.0,
         ),
-        with_alpha(col.accent, 200),
+        with_alpha(col.accent, 190),
     );
-    let title = match page {
-        SettingsPage::Root => "HUD+ Settings".to_string(),
-        SettingsPage::Module(id) => format!("HUD+ Settings · {}", id.title()),
-    };
     txt(
         p,
         cfg,
-        &title,
-        view.panel.x + 8.0,
-        view.panel.y + 6.0,
+        "HUD+ 4 · settings",
+        view.panel.x + 7.0,
+        view.panel.y + 5.0,
         col.accent,
-        1.2,
+        1.0,
     );
-    let profile = format!("{}  ·  {} modules", cfg.profile.label(), enabled_count(cfg));
-    let pw = p.width(&profile) * 0.85;
+    let profile = format!("{} · {} on", cfg.profile.label(), enabled_count(cfg));
+    let pw = p.width(&profile) * 0.78;
     txt(
         p,
         cfg,
         &profile,
-        view.panel.right() - 8.0 - pw,
-        view.panel.y + 7.0,
+        view.panel.right() - 7.0 - pw,
+        view.panel.y + 6.0,
         col.muted,
-        0.85,
+        0.78,
     );
     let mut y = view.list.y;
     for line in lines.iter().skip(view.first).take(view.visible) {
         let row = Rect::new(view.list.x, y, view.list.w, view.row_h);
         if line.header {
-            txt(
-                p,
-                cfg,
-                &line.text,
-                view.list.x + 2.0,
-                y + 3.0,
-                col.muted,
-                0.8,
-            );
-            // A hairline after the section name keeps the list from reading as
-            // one long column of equal rows.
-            let lw = p.width(&line.text) * 0.8 + 8.0;
-            let rest = (view.list.w - lw - 4.0).max(0.0);
-            p.fill(
-                Rect::new(view.list.x + lw, y + view.row_h / 2.0, rest, 1.0),
-                with_alpha(col.border, 36),
-            );
-        } else {
-            if row.contains(mouse) {
-                rounded_fill(p, row, with_alpha(col.accent, 34));
-            }
+            p.fill(row, with_alpha(col.border, 26));
             txt(
                 p,
                 cfg,
                 &line.text,
                 view.list.x + 2.0,
                 y + 2.0,
+                col.muted,
+                0.75,
+            );
+            let lw = p.width(&line.text) * 0.75 + 8.0;
+            let rest = (view.list.w - lw - 4.0).max(0.0);
+            p.fill(
+                Rect::new(view.list.x + lw, y + view.row_h / 2.0, rest, 0.5),
+                with_alpha(col.border, 34),
+            );
+        } else {
+            if row.contains(mouse) {
+                rounded_fill(p, row, with_alpha(col.accent, 38));
+            }
+            txt(
+                p,
+                cfg,
+                &line.text,
+                view.list.x + 2.0,
+                y + 1.5,
                 col.text,
-                1.0,
+                0.86,
             );
             if !line.value.is_empty() {
-                let vw = p.width(&line.value);
+                let vw = p.width(&line.value) * 0.86;
                 txt(
                     p,
                     cfg,
                     &line.value,
-                    view.list.right() - 6.0 - vw,
-                    y + 2.0,
+                    view.list.right() - 4.0 - vw,
+                    y + 1.5,
                     col.accent,
-                    1.0,
+                    0.86,
                 );
             }
         }
         y += view.row_h;
     }
     if view.lines > view.visible {
-        let track = Rect::new(view.panel.right() - 5.0, view.list.y, 2.0, view.list.h);
+        let track = Rect::new(view.panel.right() - 4.0, view.list.y, 2.0, view.list.h);
         p.fill(track, with_alpha(col.border, 40));
         let frac = view.visible as f32 / view.lines as f32;
         let thumb = (track.h * frac).max(12.0);
         let t = view.first as f32 / (view.lines - view.visible).max(1) as f32;
         p.fill(
             Rect::new(track.x, track.y + (track.h - thumb) * t, 2.0, thumb),
-            with_alpha(col.accent, 220),
-        );
-    }
-    if cfg.show_help {
-        let hint = if view.lines > view.visible {
-            "Click to change · Right-click to go back · Scroll for more · Tab: layout · Esc: close"
-        } else {
-            "Click to change · Right-click to go back · Tab: layout · Esc: close"
-        };
-        txt(
-            p,
-            cfg,
-            hint,
-            view.panel.x + 8.0,
-            view.panel.bottom() - 13.0,
-            col.muted,
-            0.8,
+            with_alpha(col.accent, 210),
         );
     }
     let more = format!(
@@ -5398,16 +5327,32 @@ pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32
         (view.first + view.visible).min(view.lines),
         view.lines
     );
-    let mw = p.width(&more) * 0.8;
+    let mw = p.width(&more) * 0.75;
     txt(
         p,
         cfg,
         &more,
-        view.panel.right() - 10.0 - mw,
-        view.panel.bottom() - 13.0,
+        view.panel.right() - 8.0 - mw,
+        view.panel.bottom() - 12.0,
         col.muted,
-        0.8,
+        0.75,
     );
+    if cfg.show_help {
+        let hint = if view.lines > view.visible {
+            "Click: change · Wheel: scroll · Esc: close"
+        } else {
+            "Click: change · Esc: close"
+        };
+        txt(
+            p,
+            cfg,
+            hint,
+            view.panel.x + 7.0,
+            view.panel.bottom() - 12.0,
+            col.muted,
+            0.72,
+        );
+    }
 }
 
 pub fn enabled_count(cfg: &Config) -> usize {
@@ -5415,6 +5360,19 @@ pub fn enabled_count(cfg: &Config) -> usize {
         .iter()
         .filter(|id| cfg.module(**id).enabled)
         .count()
+}
+
+/// The line index under `at`, with the same geometry the list is drawn with.
+fn settings_row_at(view: &SettingsView, at: [f32; 2]) -> Option<usize> {
+    if !view.list.contains(at) {
+        return None;
+    }
+    let row = ((at[1] - view.list.y) / view.row_h).floor();
+    if row < 0.0 {
+        return None;
+    }
+    let i = view.first + row as usize;
+    (i < view.lines).then_some(i)
 }
 
 /// Handles a click on the settings list. False when it hit nothing.
@@ -5425,17 +5383,12 @@ pub fn settings_click(
     at: [f32; 2],
     button: i32,
 ) -> bool {
-    let lines = setting_lines_for(cfg, editor().settings_page);
+    let lines = setting_lines(cfg);
     let view = settings_view(screen, lines.len(), scroll);
-    if !view.list.contains(at) {
-        return false;
-    }
-    let row = ((at[1] - view.list.y) / view.row_h).floor() as usize;
-    let i = view.first + row;
-    let Some(line) = lines.get(i) else {
+    let Some(i) = settings_row_at(&view, at) else {
         return false;
     };
-    let Some(action) = line.action else {
+    let Some(action) = lines[i].action else {
         return false;
     };
     let delta = if button == 1 { -1 } else { 1 };
@@ -5458,7 +5411,7 @@ pub fn settings_click(
 
 /// Scrolls the settings list by `steps`, kept within the list.
 pub fn settings_scroll(screen: (f32, f32), scroll: i32, steps: f32, cfg: &Config) -> i32 {
-    let lines = setting_lines_for(cfg, editor().settings_page).len();
+    let lines = setting_lines(cfg).len();
     let view = settings_view(screen, lines, 0);
     let max_first = lines.saturating_sub(view.visible) as i32;
     (scroll - steps.round() as i32).clamp(0, max_first)
@@ -5542,11 +5495,14 @@ fn vanilla_list_panel(screen: (f32, f32)) -> Rect {
 /// The list's last rows are the selected widget and the keys, inside the
 /// panel: nothing covers the hotbar and the bars it sits with.
 const VANILLA_FOOTER: f32 = 30.0;
+/// The list's title row: rows begin below it, in the drawing and in the hit
+/// test alike.
+const VANILLA_HEADER: f32 = 14.0;
 
 fn vanilla_list_view(screen: (f32, f32), scroll: i32) -> (Rect, f32, usize, usize) {
     let panel = vanilla_list_panel(screen);
     let row_h = 13.0;
-    let body = (panel.h - 14.0 - VANILLA_FOOTER).max(row_h);
+    let body = (panel.h - VANILLA_HEADER - VANILLA_FOOTER).max(row_h);
     let visible = (body / row_h).floor().max(1.0) as usize;
     let first = (scroll.max(0) as usize).min(VanillaId::ALL.len().saturating_sub(visible));
     (panel, row_h, first, visible)
@@ -5557,11 +5513,11 @@ fn vanilla_row_at(screen: (f32, f32), scroll: i32, at: [f32; 2]) -> Option<Vanil
     if !panel.contains(at) {
         return None;
     }
-    let row = ((at[1] - panel.y) / row_h).floor() as usize;
-    if row >= visible {
+    let row = ((at[1] - panel.y - VANILLA_HEADER) / row_h).floor();
+    if row < 0.0 || row >= visible as f32 {
         return None;
     }
-    VanillaId::ALL.get(first + row).copied()
+    VanillaId::ALL.get(first + row as usize).copied()
 }
 
 pub fn draw_editor_tabs(p: &mut dyn Painter, cfg: &Config, page: EditorPage, mouse: [f32; 2]) {
@@ -5662,7 +5618,7 @@ pub fn draw_vanilla_editor(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse
         col.accent,
         0.95,
     );
-    let mut y = panel.y + 14.0;
+    let mut y = panel.y + VANILLA_HEADER;
     for (i, id) in VanillaId::ALL
         .iter()
         .copied()
@@ -6577,65 +6533,138 @@ mod tests {
     }
 
     #[test]
-    fn settings_lines_start_with_their_section() {
-        let lines = setting_lines(&Config::default());
+    fn settings_lines_hold_every_section_on_one_screen() {
+        let cfg = Config::default();
+        let lines = setting_lines(&cfg);
         assert!(lines[0].header);
         assert_eq!(lines[0].text, "General");
-        assert!(lines.iter().any(|l| l.header && l.text == "Modules"));
+        // Every module's own section is in the same scrolling list, with its
+        // six module rows and at least one option of its own, and no row opens
+        // a separate page.
+        for id in ModuleId::ALL {
+            let title = id.title();
+            let start = lines
+                .iter()
+                .position(|l| l.header && l.text == title)
+                .unwrap_or_else(|| panic!("no section for {title}"));
+            assert!(lines[start + 1..].iter().any(|l| l.text == "Enabled"));
+            assert!(lines[start + 1..].iter().any(|l| l.text == "Anchor"));
+            assert!(
+                lines[start + 1..].iter().take_while(|l| !l.header).count() > 2,
+                "{title} has no options of its own"
+            );
+        }
         assert!(
             lines
                 .iter()
-                .any(|l| l.action == Some(Action::OpenModuleSettings(ModuleId::Coords)))
+                .all(|l| !matches!(l.action, Some(Action::CloseScreen)))
+                || lines.iter().any(|l| l.text == "Close settings")
         );
+        assert!(lines.iter().any(|l| l.header && l.text == "Vanilla HUD"));
+        assert!(lines.iter().any(|l| l.header && l.text == "Tooltips"));
         let view = settings_view((320.0, 200.0), lines.len(), 0);
         assert!(view.visible > 0);
         assert_eq!(view.first, 0);
+        assert!(view.panel.right() <= 320.0);
+        assert!(view.panel.w < 320.0);
     }
 
     #[test]
-    fn every_module_has_its_own_settings_page() {
+    fn settings_row_hit_test_follows_the_drawn_row() {
         let cfg = Config::default();
-        let root = setting_lines(&cfg);
-        for id in ModuleId::ALL {
-            let row = root
-                .iter()
-                .find(|l| l.action == Some(Action::OpenModuleSettings(id)))
-                .unwrap_or_else(|| panic!("no row for {}", id.title()));
-            let expected = if cfg.module(id).enabled { "ON" } else { "OFF" };
-            assert_eq!(row.value, expected);
-            assert!(row.text == id.title());
-        }
-        // Every page carries the six module rows plus at least one option
-        // that belongs to that module alone.
-        for id in ModuleId::ALL {
-            let page = setting_lines_for(&cfg, SettingsPage::Module(id));
-            assert!(page[0].header, "{} has no header", id.title());
-            assert_eq!(page[0].text, "Modules");
-            assert_eq!(page[1].action, Some(Action::OpenSettings));
-            assert_eq!(page[1].text, "Back to modules");
-            assert!(
-                page.len() > 7,
-                "{} has only {} rows",
-                id.title(),
-                page.len()
+        let lines = setting_lines(&cfg);
+        let screen = (640.0, 360.0);
+        let scroll = 7;
+        let view = settings_view(screen, lines.len(), scroll);
+        for row in 0..view.visible {
+            let at = [
+                view.list.x + view.list.w / 2.0,
+                view.list.y + (row as f32 + 0.5) * view.row_h,
+            ];
+            assert_eq!(
+                settings_row_at(&view, at),
+                Some(view.first + row),
+                "row {row} maps below itself"
             );
         }
-        let page = setting_lines_for(&cfg, SettingsPage::Module(ModuleId::Coords));
-        assert!(page.iter().any(|l| l.text == "Facing"));
-        assert!(!page.iter().any(|l| l.text == "Saturation"));
-        assert!(
-            setting_lines_for(&cfg, SettingsPage::Module(ModuleId::Effects))
-                .iter()
-                .any(|l| l.text == "Icons")
+        // The title and the footer are not rows.
+        assert_eq!(
+            settings_row_at(&view, [view.list.x + 4.0, view.panel.y + 4.0]),
+            None
         );
-        assert!(
-            setting_lines_for(&cfg, SettingsPage::Module(ModuleId::Armor))
-                .iter()
-                .any(|l| l.text == "Percent")
+        assert_eq!(
+            settings_row_at(
+                &view,
+                [
+                    view.list.x + 4.0,
+                    view.panel.bottom() - 4.0
+                ]
+            ),
+            None
         );
-        let coords = setting_lines_for(&cfg, SettingsPage::Module(ModuleId::AppleSkin));
-        assert!(coords.iter().any(|l| l.text == "Saturation"));
-        assert!(!coords.iter().any(|l| l.text == "Facing"));
+        assert_eq!(
+            settings_view(screen, lines.len(), 0).first, 0,
+            "first row is visible without scrolling"
+        );
+    }
+
+    #[test]
+    fn vanilla_list_hit_test_picks_the_row_under_the_pointer() {
+        let screen = (640.0, 360.0);
+        let (panel, row_h, first, visible) = vanilla_list_view(screen, 0);
+        let rows = visible.min(VanillaId::ALL.len() - first);
+        for row in 0..rows {
+            let at = [
+                panel.x + 10.0,
+                panel.y + VANILLA_HEADER + (row as f32 + 0.5) * row_h,
+            ];
+            assert_eq!(
+                vanilla_row_at(screen, 0, at),
+                Some(VanillaId::ALL[first + row]),
+                "row {row} selects the wrong widget"
+            );
+        }
+        // The title and the footer are not rows.
+        assert_eq!(
+            vanilla_row_at(screen, 0, [panel.x + 10.0, panel.y + 5.0]),
+            None
+        );
+        assert_eq!(
+            vanilla_row_at(
+                screen,
+                0,
+                [panel.x + 10.0, panel.y + VANILLA_HEADER + visible as f32 * row_h + 2.0]
+            ),
+            None
+        );
+        // Scrolled lists hit their own first row, not the first widget.
+        let (_, _, first, _) = vanilla_list_view(screen, 2);
+        assert_eq!(
+            vanilla_row_at(
+                screen,
+                2,
+                [panel.x + 10.0, panel.y + VANILLA_HEADER + row_h / 2.0]
+            ),
+            Some(VanillaId::ALL[first])
+        );
+    }
+
+    #[test]
+    fn subtitle_box_sits_where_the_captions_are_drawn() {
+        let screen = (640.0, 360.0);
+        let box_ = VanillaId::Subtitle.default_box(screen);
+        // `SubtitleOverlay` right-aligns the captions above the hotbar.
+        assert!(box_.right() >= screen.0 - 2.0);
+        assert!(box_.y > screen.1 - 60.0, "captions belong at the bottom");
+        assert!(box_.h > 0.0 && box_.w > 0.0);
+        // A moved subtitle keeps its offset as the distance from vanilla's
+        // own place, so the editor's box and the captions travel together.
+        let mut cfg = Config::default();
+        cfg.vanilla.get_mut(VanillaId::Subtitle).offset = [0.0, -150.0];
+        assert_eq!(
+            vanilla_rect(&cfg, VanillaId::Subtitle, screen).y,
+            box_.y - 150.0
+        );
     }
 
     #[test]

@@ -545,13 +545,15 @@ pub(super) fn key(game: &mut Game<'_>, key: &str, pressed: bool) -> bool {
     let cfg = config();
     let editor = cfg.editor_hotkey.key();
     if !editor.is_empty() && key == editor {
-        m::edit_editor(|e| e.page = m::EditorPage::Mods);
+        m::edit_editor(|e| {
+            e.page = m::EditorPage::Mods;
+            e.scroll = 0;
+        });
         return open(game, m::ScreenMode::Layout);
     }
     let settings = cfg.settings_hotkey.key();
     if !settings.is_empty() && key == settings {
         m::edit_editor(|e| {
-            e.settings_page = m::SettingsPage::Root;
             e.scroll = 0;
         });
         return open(game, m::ScreenMode::Settings);
@@ -561,6 +563,7 @@ pub(super) fn key(game: &mut Game<'_>, key: &str, pressed: bool) -> bool {
         if opened {
             m::edit_editor(|e| {
                 e.page = m::EditorPage::Vanilla;
+                e.scroll = 0;
                 e.selected_vanilla = e.selected_vanilla.or(Some(m::VanillaId::Hotbar));
             });
         }
@@ -673,14 +676,19 @@ pub(super) fn screen_key(
                 if page == m::EditorPage::Mods {
                     m::edit_editor(|e| {
                         e.page = m::EditorPage::Vanilla;
+                        e.scroll = 0;
                         e.selected_vanilla = e.selected_vanilla.or(Some(m::VanillaId::Hotbar));
                     });
                 } else {
+                    m::edit_editor(|e| e.scroll = 0);
                     m::set_mode(m::ScreenMode::Settings);
                 }
             }
             m::ScreenMode::Settings => {
-                m::edit_editor(|e| e.page = m::EditorPage::Mods);
+                m::edit_editor(|e| {
+                    e.page = m::EditorPage::Mods;
+                    e.scroll = 0;
+                });
                 m::set_mode(m::ScreenMode::Layout);
             }
             m::ScreenMode::Closed => return false,
@@ -929,7 +937,10 @@ pub(super) fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
             game.native_chat(if on { "HUD+ on" } else { "HUD+ off" });
         }
         "layout" => {
-            m::edit_editor(|e| e.page = m::EditorPage::Mods);
+            m::edit_editor(|e| {
+                e.page = m::EditorPage::Mods;
+                e.scroll = 0;
+            });
             if open(game, m::ScreenMode::Layout) {
                 game.native_chat("HUD+ layout editor");
             } else {
@@ -939,6 +950,7 @@ pub(super) fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
         "vanilla" => {
             m::edit_editor(|e| {
                 e.page = m::EditorPage::Vanilla;
+                e.scroll = 0;
                 e.selected_vanilla = e.selected_vanilla.or(Some(m::VanillaId::Hotbar));
             });
             if open(game, m::ScreenMode::Layout) {
@@ -949,7 +961,6 @@ pub(super) fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
         }
         "settings" => {
             m::edit_editor(|e| {
-                e.settings_page = m::SettingsPage::Root;
                 e.scroll = 0;
             });
             if open(game, m::ScreenMode::Settings) {
@@ -967,10 +978,11 @@ pub(super) fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
             game.native_chat("HUD+ layout reset");
         }
         "profile" => {
+            let key = words.next().unwrap_or("");
             let found = m::Profile::ALL
                 .iter()
                 .copied()
-                .find(|p| p.key() == words.next().unwrap_or(""));
+                .find(|p| p.key() == key);
             match found {
                 Some(profile) => {
                     let mut cfg = config();
@@ -985,10 +997,11 @@ pub(super) fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
             }
         }
         "theme" => {
+            let key = words.next().unwrap_or("");
             let found = m::Theme::ALL
                 .iter()
                 .copied()
-                .find(|t| t.key() == words.next().unwrap_or(""));
+                .find(|t| t.key() == key);
             match found {
                 Some(theme) => {
                     let _ = m::edit_config(|c| {
