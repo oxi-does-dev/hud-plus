@@ -1,4 +1,4 @@
-# HUD+ 4
+# HUD+ 5
 
 HUD+ is a native Horizon HUD mod: one bundle that replaces a pile of separate
 HUD mods and adds a drag-and-drop layout editor. Everything is configurable in
@@ -8,7 +8,7 @@ game; no files need editing by hand.
 
 | Module | What it shows |
 | --- | --- |
-| AppleSkin | The original mod's look: golden saturation outlines over the hunger icons, the food and saturation the held item would restore flashing on the same bar, plus optional numbers and an exhaustion readout above it |
+| AppleSkin | The original mod's look: golden saturation outlines over the hunger icons, a barely visible exhaustion checkerboard behind the bar, the food and saturation the held item would restore flashing on the same bar, plus optional numbers and an exhaustion readout above it |
 | Effects | Status effects with names, amplifiers, remaining time (clock, seconds, ticks or both), sorting, grouping, an expiring-only filter and a warning colour; can hide vanilla's icons |
 | Inventory | The whole inventory, the hotbar, armour and offhand, stack counts, durability bars or percentages, the selected slot, and a preview beside an open container |
 | Armour | Each armour piece and its remaining durability, with per-piece names, percentages, bars and a low-durability warning |
@@ -44,7 +44,23 @@ Standard.
 AppleSkin follows [squeek502/AppleSkin](https://github.com/squeek502/AppleSkin) (26.3):
 its four saturation outlines from `icons.png` (public domain) sit on the vanilla
 hunger bar, and holding food flashes the hunger and saturation it would restore.
-Moving *Health & hunger* on the Vanilla page takes the overlay with the bar.
+A faint checkerboard is painted behind the hunger icons and gets a little
+brighter as exhaustion climbs to 4; it is on in Standard and Full and off in
+the two smaller views. Moving *Health & hunger* on the Vanilla page takes the
+overlay with the bar.
+
+### Empty modules
+
+The *Empty modules* row on the General page decides what a module with nothing
+to show does, for every module at once:
+
+- **Compact** (default) hides the module. An empty inventory disappears
+  completely instead of shrinking to a padded dot, and empty effects, armour,
+  held-item and info modules leave no panel behind.
+- **Always full** keeps each enabled module in place. The inventory keeps its
+  full slot grid with the blank slots visible; text modules show one quiet
+  placeholder (`No effects`, `No armour`, `Empty hand`, `No info fields`) so
+  the layout does not jump around while the world changes.
 
 
 All modules have an anchor (nine positions), an offset, a scale, a background
@@ -67,14 +83,23 @@ contrast, Amber) set everything at once.
   every widget. The real HUD stays visible while you edit, so what you see is
   what the game draws.
 - `N` opens settings as one compact panel on the right; the world stays
-  visible while it is open. The list scrolls through General, every module,
-  Vanilla HUD and Tooltips — there are no module pages. Each module has its
-  own section with `Enabled`, `View`, `Anchor`, `Scale`, `Background`,
-  `Border` and every option specific to it. Click a row to change it,
-  right-click to go back, wheel to scroll, `Esc` to close. The first row is
-  the master switch, so the whole HUD can be turned off without leaving the
-  world. The `Vanilla HUD` section turns the widget control on or off and
-  opens the vanilla page.
+  visible while it is open. A rail down the left side gives every module and
+  HUD area its own page — General, AppleSkin, Effects, Inventory, Armour,
+  Captions, Coordinates, Keys, Info, Health, Held, Vanilla HUD and Tooltips —
+  so options are spread out instead of forming one long wall of text. Click a
+  rail entry to switch pages; each page holds only that module's rows, plus
+  `Enabled`, `View`, `Anchor`, `Scale`, `Background` and `Border` on the module
+  pages. Click a row to change it, right-click to go back, wheel to scroll,
+  `Esc` to close. The first row of General is the master switch, so the whole
+  HUD can be turned off without leaving the world.
+- The **Captions** page is where subtitles are moved: `Move captions`,
+  `Horizontal offset`, `Vertical offset` and `Scale` act on the subtitle box
+  directly, `Reset captions` puts it back on the vanilla bottom line, and
+  `Edit on the vanilla page` opens the same element in the box editor.
+  Dragging the *Subtitles* box or row on the Vanilla page works too.
+- General also has the **Empty modules** choice (`Always full` or `Compact`,
+  see above), the layout/settings hotkeys, the layout reset and the two editor
+  shortcuts. Vanilla HUD turns the widget control on or off.
 - `/hudplus` shows the command help. `/hudplus on|off`, `layout`, `settings`,
   `reset`, `profile <name>` and `theme <name>` also work.
 - Options > Mods lists HUD+ and has buttons for on/off, theme, profile and a

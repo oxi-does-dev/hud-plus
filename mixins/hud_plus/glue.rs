@@ -528,7 +528,7 @@ pub(super) fn draw_screen(
             }
         },
         m::ScreenMode::Settings => {
-            m::draw_settings(&mut painter, &cfg, editor.scroll, screen.mouse)
+            m::draw_settings(&mut painter, &cfg, editor.settings_tab, editor.scroll, screen.mouse)
         }
         m::ScreenMode::Closed => {}
     }
@@ -593,15 +593,18 @@ pub(super) fn screen_press(
             if button != 0 && button != 1 {
                 return false;
             }
+            let size = (screen.rect[2], screen.rect[3]);
+            if let Some(tab) = m::settings_tab_at(size, screen.mouse) {
+                m::edit_editor(|e| {
+                    e.settings_tab = tab;
+                    e.scroll = 0;
+                });
+                return true;
+            }
             let scroll = m::editor().scroll;
+            let tab = m::editor().settings_tab;
             let cfg = config();
-            let hit = m::settings_click(
-                (screen.rect[2], screen.rect[3]),
-                scroll,
-                &cfg,
-                screen.mouse,
-                button,
-            );
+            let hit = m::settings_click(size, tab, scroll, &cfg, screen.mouse, button);
             if hit {
                 commit();
             }
@@ -648,6 +651,7 @@ pub(super) fn screen_scroll(
             let cfg = config();
             let scroll = m::settings_scroll(
                 (screen.rect[2], screen.rect[3]),
+                m::editor().settings_tab,
                 m::editor().scroll,
                 steps,
                 &cfg,
@@ -708,6 +712,7 @@ pub(super) fn screen_key(
                 let cfg = config();
                 let scroll = m::settings_scroll(
                     (screen.rect[2], screen.rect[3]),
+                    m::editor().settings_tab,
                     m::editor().scroll,
                     4.0,
                     &cfg,
@@ -719,6 +724,7 @@ pub(super) fn screen_key(
                 let cfg = config();
                 let scroll = m::settings_scroll(
                     (screen.rect[2], screen.rect[3]),
+                    m::editor().settings_tab,
                     m::editor().scroll,
                     -4.0,
                     &cfg,
@@ -827,6 +833,20 @@ pub(super) fn layer_pre(game: &Game<'_>, layer: &str, batch: &mut HudBatch, canc
         }
         s.push((layer.to_owned(), batch.vertices.len()));
     });
+    // The exhaustion board belongs under the vanilla hunger icons, so it is
+    // painted before that layer rather than with the rest of the HUD above it.
+    if layer == "minecraft:player_health" {
+        let cfg = config();
+        if cfg.enabled
+            && cfg.apple_skin.module.enabled
+            && game.native_on(m::ID)
+            && game.native_playing()
+        {
+            let s = cached_snapshot();
+            let mut painter = GamePainter { game, batch };
+            m::draw_apple_skin_exhaustion(&mut painter, &s, &cfg);
+        }
+    }
     if layer != "minecraft:effects" {
         return;
     }

@@ -8,7 +8,7 @@ use std::path::Path;
 
 pub const ID: &str = "hud_plus";
 pub const NAME: &str = "HUD+";
-pub const VERSION: &str = "4";
+pub const VERSION: &str = "5";
 pub const DESCRIPTION: &str = "Ultimate configurable HUD: AppleSkin hunger and saturation, effect timers, inventory, armour, coordinates, keystrokes, FPS, time, speed, vitals, held-item info, food tooltips and a drag-and-drop layout editor.";
 pub const CONFIG_FILE: &str = "hud_plus.json";
 pub const CONFIG_VERSION: u32 = 1;
@@ -759,6 +759,45 @@ impl View {
     }
 }
 
+/// What a module with nothing to show does. `Compact` hides it (and keeps the
+/// inventory from shrinking to a lonely padded dot); `AlwaysFull` keeps the
+/// module's full panel in place, with a placeholder for text modules and the
+/// complete slot grid for the inventory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmptyMode {
+    AlwaysFull,
+    #[default]
+    Compact,
+}
+
+impl EmptyMode {
+    pub const ALL: [EmptyMode; 2] = [EmptyMode::AlwaysFull, EmptyMode::Compact];
+    pub fn key(self) -> &'static str {
+        match self {
+            EmptyMode::AlwaysFull => "always_full",
+            EmptyMode::Compact => "compact",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            EmptyMode::AlwaysFull => "Always full",
+            EmptyMode::Compact => "Compact",
+        }
+    }
+    pub fn next(self) -> Self {
+        match self {
+            EmptyMode::AlwaysFull => EmptyMode::Compact,
+            EmptyMode::Compact => EmptyMode::AlwaysFull,
+        }
+    }
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "always_full" => EmptyMode::AlwaysFull,
+            _ => EmptyMode::Compact,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -843,7 +882,9 @@ impl Default for AppleSkin {
             show_saturation: true,
             show_preview: true,
             show_numbers: false,
-            show_exhaustion: false,
+            // The faint exhaustion checkerboard is part of the bar's look;
+            // the text readout still waits for `show_numbers`.
+            show_exhaustion: true,
             show_regen: false,
             low_threshold: 6,
             compact: false,
@@ -1681,6 +1722,7 @@ pub struct Config {
     pub snap: bool,
     pub grid: u8,
     pub show_help: bool,
+    pub empty_mode: EmptyMode,
     pub apple_skin: AppleSkin,
     pub effects: Effects,
     pub inventory: Inventory,
@@ -1708,6 +1750,7 @@ impl Default for Config {
             snap: true,
             grid: 8,
             show_help: true,
+            empty_mode: EmptyMode::Compact,
             apple_skin: AppleSkin::default(),
             effects: Effects::default(),
             inventory: Inventory::default(),
@@ -1864,6 +1907,7 @@ impl Config {
             "snap": self.snap,
             "grid": self.grid,
             "show_help": self.show_help,
+            "empty_mode": self.empty_mode.key(),
             "apple_skin": {
                 "view": self.apple_skin.view.key(),
                 "module": module_json(&self.apple_skin.module),
@@ -1995,6 +2039,7 @@ impl Config {
         c.snap = get_bool(&v, "snap", c.snap);
         c.grid = get_num(&v, "grid", c.grid as f64).clamp(1.0, 64.0) as u8;
         c.show_help = get_bool(&v, "show_help", c.show_help);
+        c.empty_mode = EmptyMode::parse(get_str(&v, "empty_mode", c.empty_mode.key()));
         c.apple_skin = apple_skin_from(&v);
         c.effects = effects_from(&v);
         c.inventory = inventory_from(&v);
@@ -2677,6 +2722,78 @@ pub enum ScreenMode {
     Layout,
 }
 
+/// The settings rail: one page per module or HUD area instead of one long
+/// scroll through every option. The section strings match `all_setting_rows`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SettingsTab {
+    #[default]
+    General,
+    AppleSkin,
+    Effects,
+    Inventory,
+    Armor,
+    Captions,
+    Coords,
+    Keys,
+    Info,
+    Health,
+    Held,
+    Vanilla,
+    Tooltips,
+}
+
+impl SettingsTab {
+    pub const ALL: [SettingsTab; 13] = [
+        SettingsTab::General,
+        SettingsTab::AppleSkin,
+        SettingsTab::Effects,
+        SettingsTab::Inventory,
+        SettingsTab::Armor,
+        SettingsTab::Captions,
+        SettingsTab::Coords,
+        SettingsTab::Keys,
+        SettingsTab::Info,
+        SettingsTab::Health,
+        SettingsTab::Held,
+        SettingsTab::Vanilla,
+        SettingsTab::Tooltips,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            SettingsTab::General => "General",
+            SettingsTab::AppleSkin => "AppleSkin",
+            SettingsTab::Effects => "Effects",
+            SettingsTab::Inventory => "Inventory",
+            SettingsTab::Armor => "Armour",
+            SettingsTab::Captions => "Captions",
+            SettingsTab::Coords => "Coordinates",
+            SettingsTab::Keys => "Keys",
+            SettingsTab::Info => "Info",
+            SettingsTab::Health => "Health",
+            SettingsTab::Held => "Held",
+            SettingsTab::Vanilla => "Vanilla HUD",
+            SettingsTab::Tooltips => "Tooltips",
+        }
+    }
+    fn section(self) -> &'static str {
+        match self {
+            SettingsTab::General => "General",
+            SettingsTab::AppleSkin => "AppleSkin",
+            SettingsTab::Effects => "Effect timers",
+            SettingsTab::Inventory => "Inventory",
+            SettingsTab::Armor => "Armour & durability",
+            SettingsTab::Captions => "Captions",
+            SettingsTab::Coords => "Coordinates",
+            SettingsTab::Keys => "Keystrokes",
+            SettingsTab::Info => "Performance & time",
+            SettingsTab::Health => "Player vitals",
+            SettingsTab::Held => "Held items",
+            SettingsTab::Vanilla => "Vanilla HUD",
+            SettingsTab::Tooltips => "Tooltips",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EditorPage {
     #[default]
@@ -2693,6 +2810,7 @@ pub struct EditorState {
     pub grab: [f32; 2],
     pub scroll: i32,
     pub page: EditorPage,
+    pub settings_tab: SettingsTab,
 }
 
 impl Default for EditorState {
@@ -2705,13 +2823,14 @@ impl Default for EditorState {
             grab: [0.0, 0.0],
             scroll: 0,
             page: EditorPage::Mods,
+            settings_tab: SettingsTab::General,
         }
     }
 }
 
 thread_local! {
     static MODE: std::cell::Cell<ScreenMode> = const { std::cell::Cell::new(ScreenMode::Closed) };
-    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods }) };
+    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods, settings_tab: SettingsTab::General }) };
     static RECTS: std::cell::RefCell<Vec<(ModuleId, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
     static PENDING: std::cell::Cell<Option<ScreenMode>> = const { std::cell::Cell::new(None) };
 }
@@ -2939,9 +3058,13 @@ pub fn draw_module_at(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, id: Modul
 }
 
 fn module_wanted(id: ModuleId, s: &Snapshot, cfg: &Config) -> bool {
+    let always_full = cfg.empty_mode == EmptyMode::AlwaysFull;
     match id {
         ModuleId::Inventory => {
             if !s.survival && !cfg.inventory.creative {
+                return false;
+            }
+            if !always_full && !inventory_has_items(s, &cfg.inventory) {
                 return false;
             }
             match cfg.inventory.when {
@@ -2950,17 +3073,34 @@ fn module_wanted(id: ModuleId, s: &Snapshot, cfg: &Config) -> bool {
                 InventoryWhen::ContainerOpen => s.screen == "inventory" || s.screen == "creative",
             }
         }
-        ModuleId::Effects => !s.effects.is_empty() || cfg.effects.expiring_only,
+        ModuleId::Effects => always_full || !effect_cells(s, &cfg.effects).is_empty(),
         // The overlay hangs on the hunger bar, which a non-survival game
         // does not draw.
         ModuleId::AppleSkin => s.survival || cfg.apple_skin.show_bars,
-        ModuleId::Info => s.in_world && !info_lines(s, &cfg.info).is_empty(),
+        ModuleId::Info => s.in_world && (always_full || !info_lines(s, &cfg.info).is_empty()),
+        ModuleId::Armor => s.in_world && (always_full || !armor_rows(s, &cfg.armor).is_empty()),
+        ModuleId::Held => s.in_world && (always_full || !held_rows(s, &cfg.held).is_empty()),
         _ => s.in_world,
     }
 }
 
-fn module_size(id: ModuleId, p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
+/// What an empty module shows in `Always full`: a single quiet line, so the
+/// panel keeps its place instead of collapsing into a padded dot.
+fn module_placeholder(id: ModuleId, s: &Snapshot, cfg: &Config) -> Option<&'static str> {
+    if cfg.empty_mode != EmptyMode::AlwaysFull {
+        return None;
+    }
     match id {
+        ModuleId::Effects if effect_cells(s, &cfg.effects).is_empty() => Some("No effects"),
+        ModuleId::Armor if armor_rows(s, &cfg.armor).is_empty() => Some("No armour"),
+        ModuleId::Held if held_rows(s, &cfg.held).is_empty() => Some("Empty hand"),
+        ModuleId::Info if info_lines(s, &cfg.info).is_empty() => Some("No info fields"),
+        _ => None,
+    }
+}
+
+fn module_size(id: ModuleId, p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
+    let size = match id {
         ModuleId::AppleSkin => size_apple_skin(p, s, cfg),
         ModuleId::Effects => size_effects(p, s, cfg),
         ModuleId::Inventory => size_inventory(p, s, cfg),
@@ -2970,7 +3110,18 @@ fn module_size(id: ModuleId, p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f3
         ModuleId::Info => size_info(p, s, cfg),
         ModuleId::Health => size_health(p, s, cfg),
         ModuleId::Held => size_held(p, s, cfg),
+    };
+    if size.0 > 0.0 && size.1 > 0.0 {
+        return size;
     }
+    if let Some(text) = module_placeholder(id, s, cfg) {
+        let m = cfg.module(id);
+        return (
+            p.width(text) * m.scale + 2.0 * pad(m),
+            line_h(m) + 2.0 * pad(m),
+        );
+    }
+    size
 }
 
 fn draw_body(
@@ -2981,6 +3132,11 @@ fn draw_body(
     r: Rect,
     col: &Colours,
 ) {
+    if let Some(text) = module_placeholder(id, s, cfg) {
+        let m = cfg.module(id);
+        txt(p, cfg, text, r.x + pad(m), r.y + pad(m), col.muted, m.scale);
+        return;
+    }
     match id {
         ModuleId::AppleSkin => draw_apple_skin(p, s, cfg, r, col),
         ModuleId::Effects => draw_effects(p, s, cfg, r, col),
@@ -3648,6 +3804,81 @@ fn apple_skin_icon_right(m: &ModuleBox, bar_scale: f32, pad: f32, screen: (f32, 
     x + bar_w - pad
 }
 
+/// The hunger bar's geometry inside the AppleSkin module's box: bar scale,
+/// icon size, icon step, the right edge of the icons and their top line.
+fn apple_skin_bar(cfg: &Config, r: Rect, screen: (f32, f32)) -> (f32, f32, f32, f32, f32) {
+    let c = cfg.apple_skin.effective();
+    let m = &c.module;
+    let pad = pad(m);
+    let bar_scale = m.scale * apple_skin_scale(cfg);
+    let icon = 9.0 * bar_scale;
+    let step = 8.0 * bar_scale;
+    let el = cfg.vanilla.get(VanillaId::PlayerHealth);
+    let pinned = cfg.vanilla.enabled
+        && el.on
+        && (el.offset != [0.0, 0.0] || (el.scale - 1.0).abs() >= 0.001);
+    let right = if pinned {
+        r.right() - pad
+    } else {
+        apple_skin_icon_right(m, bar_scale, pad, screen)
+    };
+    let y = r.bottom() - pad - icon;
+    (bar_scale, icon, step, right, y)
+}
+
+/// A barely visible checkerboard on the hunger bar, denser as exhaustion
+/// climbs towards 4. Drawn before the vanilla health/hunger layer, so the
+/// icons sit on top of it.
+fn draw_exhaustion_checkerboard(p: &mut dyn Painter, r: Rect, exhaustion: f32) {
+    let level = (exhaustion / 4.0).clamp(0.0, 1.0);
+    if level <= 0.0 || r.w <= 0.0 || r.h <= 0.0 {
+        return;
+    }
+    let cell = 3.0_f32.max(r.w / 27.0);
+    let light = (8.0 + 26.0 * level).round() as u8;
+    let dark = (f32::from(light) * 0.4).round() as u8;
+    let mut y = r.y;
+    let mut row = 0;
+    while y < r.bottom() - 0.01 {
+        let h = (r.bottom() - y).min(cell);
+        let mut x = r.x;
+        let mut col = 0;
+        while x < r.right() - 0.01 {
+            let w = (r.right() - x).min(cell);
+            let alpha = if (row + col) % 2 == 0 { light } else { dark };
+            p.fill(Rect::new(x, y, w, h), argb(alpha, 255, 236, 180));
+            x += cell;
+            col += 1;
+        }
+        y += cell;
+        row += 1;
+    }
+}
+
+/// Paints only the exhaustion board at the AppleSkin module's bar. The glue
+/// calls this from the pre-layer hook, before vanilla draws the hunger icons.
+pub fn draw_apple_skin_exhaustion(p: &mut dyn Painter, s: &Snapshot, cfg: &Config) {
+    let c = cfg.apple_skin.effective();
+    if !c.show_exhaustion || s.exhaustion <= 0.0 || !s.in_world {
+        return;
+    }
+    let size = size_apple_skin(p, s, cfg);
+    if size.0 <= 0.0 || size.1 <= 0.0 {
+        return;
+    }
+    let screen = p.screen();
+    let mut r = module_rect(cfg, ModuleId::AppleSkin, size, screen);
+    r = apple_skin_follow(cfg, r, screen);
+    let (bar_scale, icon, _step, right, y) = apple_skin_bar(cfg, r, screen);
+    let bar = Rect::new(
+        right - HUNGER_BAR * bar_scale,
+        y,
+        HUNGER_BAR * bar_scale,
+        icon,
+    );
+    draw_exhaustion_checkerboard(p, bar, s.exhaustion);
+}
+
 fn size_apple_skin(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
     let c = &cfg.apple_skin.effective();
     let m = &c.module;
@@ -3669,21 +3900,7 @@ fn draw_apple_skin(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col
     let c = &cfg.apple_skin.effective();
     let m = &c.module;
     let pad = pad(m);
-    let bar_scale = m.scale * apple_skin_scale(cfg);
-    let icon = 9.0 * bar_scale;
-    let step = 8.0 * bar_scale;
-    // The icons sit on the box's bottom line, so the numbers can grow above
-    // them without moving them off the vanilla bar.
-    let pinned = cfg.vanilla.enabled
-        && cfg.vanilla.get(VanillaId::PlayerHealth).on
-        && (cfg.vanilla.get(VanillaId::PlayerHealth).offset != [0.0, 0.0]
-            || (cfg.vanilla.get(VanillaId::PlayerHealth).scale - 1.0).abs() >= 0.001);
-    let right = if pinned {
-        r.right() - pad
-    } else {
-        apple_skin_icon_right(m, bar_scale, pad, p.screen())
-    };
-    let y = r.bottom() - pad - icon;
+    let (_, icon, step, right, y) = apple_skin_bar(cfg, r, p.screen());
     let hunger = s.effects.iter().any(|e| e.id == "hunger");
     // AppleSkin draws rotten flesh's preview with the hunger textures.
     let rotten = s
@@ -4252,6 +4469,13 @@ fn shown_inventory_cells(s: &Snapshot, c: &Inventory) -> Vec<SlotCell> {
     cells
 }
 
+/// True when the inventory module has anything at all to show: an item in a
+/// configured slot, armour, or the offhand. Empty slots alone do not count.
+fn inventory_has_items(s: &Snapshot, c: &Inventory) -> bool {
+    inventory_cells(s, c).iter().any(|cell| cell.item.is_some())
+        || armor_cells(s, c).iter().any(Option::is_some)
+}
+
 pub fn armor_cells(s: &Snapshot, c: &Inventory) -> Vec<Option<ItemView>> {
     let c = &c.effective();
     let mut out = Vec::new();
@@ -4271,9 +4495,23 @@ fn inv_geom(m: &ModuleBox, c: &Inventory) -> (f32, f32) {
     (c.slot_size * m.scale, 1.0 * m.scale)
 }
 
-fn inventory_size_parts(s: &Snapshot, c: &Inventory, p: &dyn Painter) -> (f32, f32, usize) {
-    let c = &c.effective();
+fn inventory_size_parts(
+    s: &Snapshot,
+    c: &Inventory,
+    p: &dyn Painter,
+    full: bool,
+) -> (f32, f32, usize) {
+    let mut c = c.effective();
+    if full {
+        c.empty = true;
+    }
+    let c = &c;
     let cells = shown_inventory_cells(s, c);
+    let armor = armor_cells(s, c);
+    // No configured cell source at all: no panel, not even a padded dot.
+    if cells.is_empty() && armor.is_empty() {
+        return (0.0, 0.0, 0);
+    }
     let cols = c.columns.clamp(1, 9) as usize;
     let rows = if cells.is_empty() {
         0
@@ -4297,7 +4535,6 @@ fn inventory_size_parts(s: &Snapshot, c: &Inventory, p: &dyn Painter) -> (f32, f
     } else {
         rows as f32 * (slot + gap) - gap
     };
-    let armor = armor_cells(s, c);
     let armor_w = if armor.is_empty() {
         0.0
     } else {
@@ -4317,12 +4554,20 @@ fn inventory_size_parts(s: &Snapshot, c: &Inventory, p: &dyn Painter) -> (f32, f
 }
 
 fn size_inventory(p: &dyn Painter, s: &Snapshot, cfg: &Config) -> (f32, f32) {
-    let (w, h, _) = inventory_size_parts(s, &cfg.inventory, p);
+    let full = cfg.empty_mode == EmptyMode::AlwaysFull;
+    if !full && !inventory_has_items(s, &cfg.inventory) {
+        return (0.0, 0.0);
+    }
+    let (w, h, _) = inventory_size_parts(s, &cfg.inventory, p, full);
     (w, h)
 }
 
 fn draw_inventory(p: &mut dyn Painter, s: &Snapshot, cfg: &Config, r: Rect, col: &Colours) {
-    let c = &cfg.inventory.effective();
+    let mut c = cfg.inventory.effective();
+    if cfg.empty_mode == EmptyMode::AlwaysFull {
+        c.empty = true;
+    }
+    let c = &c;
     let m = &c.module;
     let pad = pad(m);
     let (slot, gap) = inv_geom(m, c);
@@ -4763,6 +5008,7 @@ impl Num {
 pub enum Pick {
     Profile,
     Theme,
+    EmptyMode,
     View(ModuleId),
     EditorHotkey,
     SettingsHotkey,
@@ -4780,6 +5026,7 @@ impl Pick {
         match self {
             Profile => c.profile.label().into(),
             Theme => c.theme.label().into(),
+            EmptyMode => c.empty_mode.label().into(),
             View(id) => c.view(id).label().into(),
             EditorHotkey => c.editor_hotkey.label().into(),
             SettingsHotkey => c.settings_hotkey.label().into(),
@@ -4804,6 +5051,13 @@ impl Pick {
                 c.apply_profile(p);
             }
             Theme => c.theme = if up { c.theme.next() } else { c.theme.prev() },
+            EmptyMode => {
+                c.empty_mode = if up {
+                    c.empty_mode.next()
+                } else {
+                    c.empty_mode.prev()
+                }
+            }
             View(id) => {
                 let v = c.view(id);
                 *c.view_mut(id) = if up { v.next() } else { v.prev() };
@@ -4890,6 +5144,7 @@ prev_impl!(InventoryWhen);
 prev_impl!(ItemDurability);
 prev_impl!(CountMode);
 prev_impl!(View);
+prev_impl!(EmptyMode);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -4901,6 +5156,12 @@ pub enum Action {
     ResetAll,
     OpenLayout,
     OpenVanilla,
+    OpenCaptions,
+    CaptionOn,
+    CaptionX,
+    CaptionY,
+    CaptionScale,
+    CaptionReset,
     CloseScreen,
 }
 
@@ -4923,6 +5184,18 @@ impl Action {
                 }
             }
             Action::Toggle(f) => (if f.get(c) { "ON" } else { "OFF" }).into(),
+            Action::CaptionOn => {
+                if c.vanilla.get(VanillaId::Subtitle).on {
+                    "ON".into()
+                } else {
+                    "OFF".into()
+                }
+            }
+            Action::CaptionX => format!("{:.0}", c.vanilla.get(VanillaId::Subtitle).offset[0]),
+            Action::CaptionY => format!("{:.0}", c.vanilla.get(VanillaId::Subtitle).offset[1]),
+            Action::CaptionScale => {
+                format!("{:.2}x", c.vanilla.get(VanillaId::Subtitle).scale)
+            }
             Action::Amount(n) => {
                 let v = n.get(c);
                 let (_, _, step) = n.range();
@@ -4976,6 +5249,34 @@ impl Action {
                 true
             }
             Action::Choice(p) => p.change(c, delta),
+            Action::CaptionOn => {
+                let el = c.vanilla.get_mut(VanillaId::Subtitle);
+                el.on = !el.on;
+                true
+            }
+            Action::CaptionX | Action::CaptionY => {
+                let step = if c.snap { f32::from(c.grid) } else { 1.0 };
+                let d = step * delta.signum() as f32;
+                let el = c.vanilla.get_mut(VanillaId::Subtitle);
+                if matches!(self, Action::CaptionX) {
+                    el.offset[0] = (el.offset[0] + d).clamp(-4096.0, 4096.0);
+                } else {
+                    el.offset[1] = (el.offset[1] + d).clamp(-4096.0, 4096.0);
+                }
+                el.on = true;
+                true
+            }
+            Action::CaptionScale => {
+                let el = c.vanilla.get_mut(VanillaId::Subtitle);
+                let next = el.scale + 0.05 * delta.signum() as f32;
+                el.scale = (next * 100.0).round().clamp(25.0, 400.0) / 100.0;
+                el.on = true;
+                true
+            }
+            Action::CaptionReset => {
+                *c.vanilla.get_mut(VanillaId::Subtitle) = VanillaElement::default();
+                true
+            }
             Action::ResetLayout => {
                 c.reset_layout();
                 true
@@ -4993,6 +5294,14 @@ impl Action {
                 edit_editor(|e| {
                     e.page = EditorPage::Vanilla;
                     e.selected_vanilla = e.selected_vanilla.or(Some(VanillaId::Hotbar));
+                });
+                set_pending(ScreenMode::Layout);
+                false
+            }
+            Action::OpenCaptions => {
+                edit_editor(|e| {
+                    e.page = EditorPage::Vanilla;
+                    e.selected_vanilla = Some(VanillaId::Subtitle);
                 });
                 set_pending(ScreenMode::Layout);
                 false
@@ -5033,11 +5342,20 @@ fn all_setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     rows.push((Choice(P::EditorHotkey), "Layout hotkey", "General"));
     rows.push((Choice(P::SettingsHotkey), "Settings hotkey", "General"));
     rows.push((Toggle(F::ShowHelp), "Show hints", "General"));
+    rows.push((Choice(P::EmptyMode), "Empty modules", "General"));
     rows.push((ResetLayout, "Reset layout", "General"));
     rows.push((ResetAll, "Reset everything", "General"));
     rows.push((OpenLayout, "Open layout editor", "General"));
-    rows.push((OpenVanilla, "Edit vanilla HUD", "Vanilla HUD"));
+    rows.push((OpenVanilla, "Edit vanilla HUD", "General"));
+    rows.push((CloseScreen, "Close settings", "General"));
     rows.push((Toggle(F::VanillaHud), "Move vanilla HUD", "Vanilla HUD"));
+
+    rows.push((CaptionOn, "Move captions", "Captions"));
+    rows.push((CaptionX, "Horizontal offset", "Captions"));
+    rows.push((CaptionY, "Vertical offset", "Captions"));
+    rows.push((CaptionScale, "Scale", "Captions"));
+    rows.push((CaptionReset, "Reset captions", "Captions"));
+    rows.push((OpenCaptions, "Edit on the vanilla page", "Captions"));
 
     module(&mut rows, M::AppleSkin);
     rows.push((Toggle(F::AppleSaturation), "Saturation", "AppleSkin"));
@@ -5144,7 +5462,6 @@ fn all_setting_rows() -> Vec<(Action, &'static str, &'static str)> {
 
     rows.push((Toggle(F::TooltipFood), "Food values", "Tooltips"));
     rows.push((Toggle(F::TooltipSneak), "Sneak details", "Tooltips"));
-    rows.push((CloseScreen, "Close settings", "Tooltips"));
     rows
 }
 
@@ -5155,81 +5472,102 @@ pub fn setting_rows() -> Vec<(Action, &'static str, &'static str)> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SettingLine {
-    pub header: bool,
     pub text: String,
     pub action: Option<Action>,
     pub value: String,
 }
 
-pub fn setting_lines(cfg: &Config) -> Vec<SettingLine> {
-    let mut out = Vec::new();
-    let mut section = "";
-    for (action, label, sec) in setting_rows() {
-        if sec != section {
-            out.push(SettingLine {
-                header: true,
-                text: sec.into(),
-                action: None,
-                value: String::new(),
-            });
-            section = sec;
-        }
-        out.push(SettingLine {
-            header: false,
+/// One page's rows: only the options under `tab`, without the section header
+/// (the rail already names it).
+pub fn setting_lines(cfg: &Config, tab: SettingsTab) -> Vec<SettingLine> {
+    setting_rows()
+        .into_iter()
+        .filter(|(_, _, section)| *section == tab.section())
+        .map(|(action, label, _)| SettingLine {
             text: label.into(),
             action: Some(action),
             value: action.value(cfg),
-        });
-    }
-    out
+        })
+        .collect()
 }
 
 pub struct SettingsView {
     pub panel: Rect,
+    pub rail: Rect,
     pub list: Rect,
     pub row_h: f32,
+    pub tab_h: f32,
     pub first: usize,
     pub visible: usize,
     pub lines: usize,
 }
 
 /// Settings rows are deliberately tighter than the layout editor's list: the
-/// whole configuration lives in one panel, and the world behind it stays
-/// visible.
-const SETTINGS_ROW_H: f32 = 12.0;
+/// panel sits on the right and the world behind it stays visible.
+const SETTINGS_ROW_H: f32 = 13.0;
+const SETTINGS_RAIL_W: f32 = 92.0;
 
 pub fn settings_view(screen: (f32, f32), lines: usize, scroll: i32) -> SettingsView {
     let (sw, sh) = screen;
     // A compact panel on the right: no full-screen veil, so the game stays
     // readable while a value is changed.
-    let w = (sw * 0.46).clamp(200.0, 330.0);
+    let w = (sw * 0.52).clamp(280.0, 460.0);
     let h = (sh - 12.0).max(96.0);
     let panel = Rect::new(sw - w - 6.0, 6.0, w, h);
     let title_h = 18.0;
-    let footer_h = 18.0;
-    let list = Rect::new(
-        panel.x + 6.0,
+    let footer_h = 17.0;
+    let body_h = (panel.h - title_h - footer_h).max(SETTINGS_ROW_H);
+    let rail = Rect::new(
+        panel.x + 4.0,
         panel.y + title_h,
-        panel.w - 12.0,
-        (panel.h - title_h - footer_h).max(SETTINGS_ROW_H),
+        SETTINGS_RAIL_W.min(panel.w * 0.34),
+        body_h,
     );
+    let list = Rect::new(
+        rail.right() + 5.0,
+        panel.y + title_h,
+        (panel.right() - 6.0) - (rail.right() + 5.0),
+        body_h,
+    );
+    let tab_h = (rail.h / SettingsTab::ALL.len() as f32).clamp(10.0, 16.0);
     let visible = (list.h / SETTINGS_ROW_H).floor().max(1.0) as usize;
     let max_first = lines.saturating_sub(visible);
     let first = (scroll.max(0) as usize).min(max_first);
     SettingsView {
         panel,
+        rail,
         list,
         row_h: SETTINGS_ROW_H,
+        tab_h,
         first,
         visible,
         lines,
     }
 }
 
-pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32; 2]) {
+/// The rail tab under `at`, with the same geometry the rail is drawn with.
+pub fn settings_tab_at(screen: (f32, f32), at: [f32; 2]) -> Option<SettingsTab> {
+    let view = settings_view(screen, 0, 0);
+    if !view.rail.contains(at) {
+        return None;
+    }
+    let row = ((at[1] - view.rail.y) / view.tab_h).floor();
+    if row < 0.0 {
+        return None;
+    }
+    SettingsTab::ALL.get(row as usize).copied()
+}
+
+pub fn draw_settings(
+    p: &mut dyn Painter,
+    cfg: &Config,
+    tab: SettingsTab,
+    scroll: i32,
+    mouse: [f32; 2],
+) {
     let col = cfg.theme.colours(cfg.opacity);
     let (sw, sh) = p.screen();
-    let lines = setting_lines(cfg);
+    let lines = setting_lines(cfg, tab);
     let view = settings_view((sw, sh), lines.len(), scroll);
     // Only the panel is painted: the world keeps its colours and brightness.
     rounded_fill(p, view.panel, with_alpha(col.header, 228));
@@ -5243,17 +5581,18 @@ pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32
         ),
         with_alpha(col.accent, 190),
     );
+    let title = format!("HUD+ 5 · {}", tab.label());
     txt(
         p,
         cfg,
-        "HUD+ 4 · settings",
+        &title,
         view.panel.x + 7.0,
         view.panel.y + 5.0,
         col.accent,
         1.0,
     );
     let profile = format!("{} · {} on", cfg.profile.label(), enabled_count(cfg));
-    let pw = p.width(&profile) * 0.78;
+    let pw = p.width(&profile) * 0.72;
     txt(
         p,
         cfg,
@@ -5261,53 +5600,63 @@ pub fn draw_settings(p: &mut dyn Painter, cfg: &Config, scroll: i32, mouse: [f32
         view.panel.right() - 7.0 - pw,
         view.panel.y + 6.0,
         col.muted,
-        0.78,
+        0.72,
+    );
+    // The rail: every module and HUD area gets its own page.
+    p.fill(view.rail, with_alpha(col.border, 22));
+    for (i, id) in SettingsTab::ALL.iter().enumerate() {
+        let r = Rect::new(
+            view.rail.x,
+            view.rail.y + i as f32 * view.tab_h,
+            view.rail.w,
+            view.tab_h,
+        );
+        let on = *id == tab;
+        if on {
+            rounded_fill(p, r, with_alpha(col.accent, 205));
+        } else if r.contains(mouse) {
+            rounded_fill(p, r, with_alpha(col.accent, 34));
+        }
+        txt(
+            p,
+            cfg,
+            id.label(),
+            r.x + 4.0,
+            r.y + (r.h - 9.0) / 2.0,
+            if on { col.header } else { col.text },
+            0.76,
+        );
+    }
+    p.fill(
+        Rect::new(view.rail.right() + 1.0, view.rail.y, 0.5, view.rail.h),
+        with_alpha(col.border, 50),
     );
     let mut y = view.list.y;
     for line in lines.iter().skip(view.first).take(view.visible) {
         let row = Rect::new(view.list.x, y, view.list.w, view.row_h);
-        if line.header {
-            p.fill(row, with_alpha(col.border, 26));
+        if row.contains(mouse) {
+            rounded_fill(p, row, with_alpha(col.accent, 38));
+        }
+        txt(
+            p,
+            cfg,
+            &line.text,
+            view.list.x + 2.0,
+            y + 1.5,
+            col.text,
+            0.86,
+        );
+        if !line.value.is_empty() {
+            let vw = p.width(&line.value) * 0.86;
             txt(
                 p,
                 cfg,
-                &line.text,
-                view.list.x + 2.0,
-                y + 2.0,
-                col.muted,
-                0.75,
-            );
-            let lw = p.width(&line.text) * 0.75 + 8.0;
-            let rest = (view.list.w - lw - 4.0).max(0.0);
-            p.fill(
-                Rect::new(view.list.x + lw, y + view.row_h / 2.0, rest, 0.5),
-                with_alpha(col.border, 34),
-            );
-        } else {
-            if row.contains(mouse) {
-                rounded_fill(p, row, with_alpha(col.accent, 38));
-            }
-            txt(
-                p,
-                cfg,
-                &line.text,
-                view.list.x + 2.0,
+                &line.value,
+                view.list.right() - 4.0 - vw,
                 y + 1.5,
-                col.text,
+                col.accent,
                 0.86,
             );
-            if !line.value.is_empty() {
-                let vw = p.width(&line.value) * 0.86;
-                txt(
-                    p,
-                    cfg,
-                    &line.value,
-                    view.list.right() - 4.0 - vw,
-                    y + 1.5,
-                    col.accent,
-                    0.86,
-                );
-            }
         }
         y += view.row_h;
     }
@@ -5375,15 +5724,16 @@ fn settings_row_at(view: &SettingsView, at: [f32; 2]) -> Option<usize> {
     (i < view.lines).then_some(i)
 }
 
-/// Handles a click on the settings list. False when it hit nothing.
+/// Handles a click on the active tab's list. False when it hit nothing.
 pub fn settings_click(
     screen: (f32, f32),
+    tab: SettingsTab,
     scroll: i32,
     cfg: &Config,
     at: [f32; 2],
     button: i32,
 ) -> bool {
-    let lines = setting_lines(cfg);
+    let lines = setting_lines(cfg, tab);
     let view = settings_view(screen, lines.len(), scroll);
     let Some(i) = settings_row_at(&view, at) else {
         return false;
@@ -5409,9 +5759,15 @@ pub fn settings_click(
     true
 }
 
-/// Scrolls the settings list by `steps`, kept within the list.
-pub fn settings_scroll(screen: (f32, f32), scroll: i32, steps: f32, cfg: &Config) -> i32 {
-    let lines = setting_lines(cfg).len();
+/// Scrolls the active tab's list by `steps`, kept within the list.
+pub fn settings_scroll(
+    screen: (f32, f32),
+    tab: SettingsTab,
+    scroll: i32,
+    steps: f32,
+    cfg: &Config,
+) -> i32 {
+    let lines = setting_lines(cfg, tab).len();
     let view = settings_view(screen, lines, 0);
     let max_first = lines.saturating_sub(view.visible) as i32;
     (scroll - steps.round() as i32).clamp(0, max_first)
@@ -5960,7 +6316,10 @@ fn screen_size_cache() -> (f32, f32) {
 }
 
 pub fn editor_release() {
-    edit_editor(|e| e.drag = None);
+    edit_editor(|e| {
+        e.drag = None;
+        e.drag_vanilla = None;
+    });
 }
 
 /// Wheel over a module changes its scale. True when it did.
@@ -6133,6 +6492,8 @@ mod tests {
         assert!(apple_text(&s, &cfg.apple_skin).is_empty());
         let mut numbers = cfg.apple_skin;
         numbers.show_numbers = true;
+        assert_eq!(apple_text(&s, &numbers)[0].0, "17 / 20   Sat 4.2   Exh 1.5");
+        numbers.show_exhaustion = false;
         assert_eq!(apple_text(&s, &numbers)[0].0, "17 / 20   Sat 4.2");
     }
 
@@ -6430,6 +6791,83 @@ mod tests {
     }
 
     #[test]
+    fn compact_empty_inventory_disappears_and_always_full_keeps_the_grid() {
+        let mut s = snapshot();
+        s.inventory = vec![None; 36];
+        s.armor_items = vec![None; 4];
+        s.offhand = None;
+        let p = MockPainter;
+        let cfg = Config::default();
+        assert_eq!(cfg.empty_mode, EmptyMode::Compact);
+        assert_eq!(size_inventory(&p, &s, &cfg), (0.0, 0.0));
+        assert!(!module_wanted(ModuleId::Inventory, &s, &cfg));
+
+        let mut full = cfg;
+        full.empty_mode = EmptyMode::AlwaysFull;
+        assert!(module_wanted(ModuleId::Inventory, &s, &full));
+        let size = size_inventory(&p, &s, &full);
+        let c = full.inventory.effective();
+        let (slot, _) = inv_geom(&c.module, &c);
+        // The default grid leaves the hotbar to vanilla: nine columns, three
+        // rows, not a lone padded dot.
+        assert!(size.0 > 9.0 * slot, "{size:?}");
+        assert!(size.1 > 3.0 * slot, "{size:?}");
+    }
+
+    #[test]
+    fn always_full_keeps_empty_modules_with_a_placeholder() {
+        let mut s = snapshot();
+        s.effects.clear();
+        s.armor_items = vec![None; 4];
+        s.held = None;
+        s.offhand = None;
+        s.arrows = 0;
+        s.totems = 0;
+        let p = MockPainter;
+        let full = Config {
+            empty_mode: EmptyMode::AlwaysFull,
+            ..Config::default()
+        };
+        assert!(module_wanted(ModuleId::Effects, &s, &full));
+        assert_eq!(
+            module_placeholder(ModuleId::Effects, &s, &full),
+            Some("No effects")
+        );
+        assert!(module_size(ModuleId::Effects, &p, &s, &full).0 > 0.0);
+        assert_eq!(
+            module_placeholder(ModuleId::Armor, &s, &full),
+            Some("No armour")
+        );
+        assert_eq!(
+            module_placeholder(ModuleId::Held, &s, &full),
+            Some("Empty hand")
+        );
+
+        let cfg = Config::default();
+        assert!(!module_wanted(ModuleId::Effects, &s, &cfg));
+        assert!(!module_wanted(ModuleId::Armor, &s, &cfg));
+        assert!(!module_wanted(ModuleId::Held, &s, &cfg));
+        assert_eq!(size_effects(&p, &s, &cfg), (0.0, 0.0));
+        assert_eq!(module_placeholder(ModuleId::Effects, &s, &cfg), None);
+    }
+
+    #[test]
+    fn captions_have_their_own_move_and_reset_actions() {
+        let mut cfg = Config::default();
+        let original = cfg.vanilla.get(VanillaId::Subtitle);
+        Action::CaptionX.change(&mut cfg, 1);
+        assert_eq!(cfg.vanilla.get(VanillaId::Subtitle).offset, [8.0, 0.0]);
+        Action::CaptionY.change(&mut cfg, 1);
+        assert_eq!(cfg.vanilla.get(VanillaId::Subtitle).offset, [8.0, 8.0]);
+        Action::CaptionScale.change(&mut cfg, 1);
+        assert!((cfg.vanilla.get(VanillaId::Subtitle).scale - 1.05).abs() < 0.001);
+        Action::CaptionOn.change(&mut cfg, 1);
+        assert!(!cfg.vanilla.get(VanillaId::Subtitle).on);
+        Action::CaptionReset.change(&mut cfg, 1);
+        assert_eq!(cfg.vanilla.get(VanillaId::Subtitle), original);
+    }
+
+    #[test]
     fn inventory_cells_follow_the_hotbar_and_columns() {
         let mut s = snapshot();
         s.inventory = (0..36)
@@ -6533,50 +6971,60 @@ mod tests {
     }
 
     #[test]
-    fn settings_lines_hold_every_section_on_one_screen() {
+    fn settings_are_split_into_one_page_per_module() {
         let cfg = Config::default();
-        let lines = setting_lines(&cfg);
-        assert!(lines[0].header);
-        assert_eq!(lines[0].text, "General");
-        // Every module's own section is in the same scrolling list, with its
-        // six module rows and at least one option of its own, and no row opens
-        // a separate page.
-        for id in ModuleId::ALL {
-            let title = id.title();
-            let start = lines
-                .iter()
-                .position(|l| l.header && l.text == title)
-                .unwrap_or_else(|| panic!("no section for {title}"));
-            assert!(lines[start + 1..].iter().any(|l| l.text == "Enabled"));
-            assert!(lines[start + 1..].iter().any(|l| l.text == "Anchor"));
-            assert!(
-                lines[start + 1..].iter().take_while(|l| !l.header).count() > 2,
-                "{title} has no options of its own"
-            );
+        for tab in SettingsTab::ALL {
+            let lines = setting_lines(&cfg, tab);
+            assert!(!lines.is_empty(), "{tab:?} has no rows");
+            assert!(lines.iter().all(|l| l.action.is_some()));
         }
-        assert!(
-            lines
+        // Every section in the model has exactly one rail tab, and no tab is
+        // empty: the old one long list is now spread over the rail.
+        let mut sections: Vec<_> = setting_rows().into_iter().map(|(_, _, s)| s).collect();
+        sections.sort_unstable();
+        sections.dedup();
+        let mut tabs: Vec<_> = SettingsTab::ALL.iter().map(|t| t.section()).collect();
+        tabs.sort_unstable();
+        tabs.dedup();
+        assert_eq!(sections, tabs);
+        // Each module keeps its common rows on its own page, beside its
+        // module-specific options.
+        for id in ModuleId::ALL {
+            let tab = SettingsTab::ALL
                 .iter()
-                .all(|l| !matches!(l.action, Some(Action::CloseScreen)))
-                || lines.iter().any(|l| l.text == "Close settings")
+                .copied()
+                .find(|t| t.section() == id.title())
+                .unwrap_or_else(|| panic!("no tab for {}", id.title()));
+            let lines = setting_lines(&cfg, tab);
+            assert!(lines.iter().any(|l| l.text == "Enabled"));
+            assert!(lines.iter().any(|l| l.text == "Anchor"));
+            assert!(lines.len() > 2, "{} has no options of its own", id.title());
+        }
+        let captions = setting_lines(&cfg, SettingsTab::Captions);
+        assert!(captions.iter().any(|l| l.text == "Horizontal offset"));
+        assert!(captions.iter().any(|l| l.text == "Vertical offset"));
+        assert!(captions.iter().any(|l| l.text == "Scale"));
+        assert!(
+            setting_lines(&cfg, SettingsTab::General)
+                .iter()
+                .any(|l| l.text == "Empty modules")
         );
-        assert!(lines.iter().any(|l| l.header && l.text == "Vanilla HUD"));
-        assert!(lines.iter().any(|l| l.header && l.text == "Tooltips"));
-        let view = settings_view((320.0, 200.0), lines.len(), 0);
+        let view = settings_view((320.0, 200.0), 12, 0);
         assert!(view.visible > 0);
         assert_eq!(view.first, 0);
         assert!(view.panel.right() <= 320.0);
         assert!(view.panel.w < 320.0);
+        assert!(view.rail.w > 0.0 && view.list.w > 0.0);
     }
 
     #[test]
     fn settings_row_hit_test_follows_the_drawn_row() {
         let cfg = Config::default();
-        let lines = setting_lines(&cfg);
+        let lines = setting_lines(&cfg, SettingsTab::General);
         let screen = (640.0, 360.0);
-        let scroll = 7;
+        let scroll = 2;
         let view = settings_view(screen, lines.len(), scroll);
-        for row in 0..view.visible {
+        for row in 0..view.visible.min(lines.len()) {
             let at = [
                 view.list.x + view.list.w / 2.0,
                 view.list.y + (row as f32 + 0.5) * view.row_h,
@@ -6593,17 +7041,24 @@ mod tests {
             None
         );
         assert_eq!(
-            settings_row_at(
-                &view,
-                [
-                    view.list.x + 4.0,
-                    view.panel.bottom() - 4.0
-                ]
-            ),
+            settings_row_at(&view, [view.list.x + 4.0, view.panel.bottom() - 4.0]),
+            None
+        );
+        // Every rail tab maps to itself, and the rail's title is not a tab.
+        for (i, tab) in SettingsTab::ALL.iter().enumerate() {
+            let at = [
+                view.rail.x + view.rail.w / 2.0,
+                view.rail.y + (i as f32 + 0.5) * view.tab_h,
+            ];
+            assert_eq!(settings_tab_at(screen, at), Some(*tab));
+        }
+        assert_eq!(
+            settings_tab_at(screen, [view.rail.x + 4.0, view.panel.y + 4.0]),
             None
         );
         assert_eq!(
-            settings_view(screen, lines.len(), 0).first, 0,
+            settings_view(screen, lines.len(), 0).first,
+            0,
             "first row is visible without scrolling"
         );
     }
@@ -6633,7 +7088,10 @@ mod tests {
             vanilla_row_at(
                 screen,
                 0,
-                [panel.x + 10.0, panel.y + VANILLA_HEADER + visible as f32 * row_h + 2.0]
+                [
+                    panel.x + 10.0,
+                    panel.y + VANILLA_HEADER + visible as f32 * row_h + 2.0
+                ]
             ),
             None
         );
