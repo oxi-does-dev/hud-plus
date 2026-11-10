@@ -8,7 +8,7 @@ use std::path::Path;
 
 pub const ID: &str = "hud_plus";
 pub const NAME: &str = "HUD+";
-pub const VERSION: &str = "5";
+pub const VERSION: &str = "6";
 pub const DESCRIPTION: &str = "Ultimate configurable HUD: AppleSkin hunger and saturation, effect timers, inventory, armour, coordinates, keystrokes, FPS, time, speed, vitals, held-item info, food tooltips and a drag-and-drop layout editor.";
 pub const CONFIG_FILE: &str = "hud_plus.json";
 pub const CONFIG_VERSION: u32 = 1;
@@ -2718,7 +2718,6 @@ pub fn pretty_id(id: &str) -> String {
 pub enum ScreenMode {
     #[default]
     Closed,
-    Settings,
     Layout,
 }
 
@@ -2732,31 +2731,29 @@ pub enum SettingsTab {
     Effects,
     Inventory,
     Armor,
-    Captions,
     Coords,
     Keys,
     Info,
     Health,
     Held,
-    Vanilla,
-    Tooltips,
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 13] = [
+    /// General, then one card per module. There is no page without a home on
+    /// the canvas: tooltip and vanilla-HUD options live in General, and the
+    /// captions are the subtitle widget in the Vanilla tab.
+    #[allow(dead_code)] // The tests walk every card; the game opens them by id.
+    pub const ALL: [SettingsTab; 10] = [
         SettingsTab::General,
         SettingsTab::AppleSkin,
         SettingsTab::Effects,
         SettingsTab::Inventory,
         SettingsTab::Armor,
-        SettingsTab::Captions,
+        SettingsTab::Health,
+        SettingsTab::Held,
         SettingsTab::Coords,
         SettingsTab::Keys,
         SettingsTab::Info,
-        SettingsTab::Health,
-        SettingsTab::Held,
-        SettingsTab::Vanilla,
-        SettingsTab::Tooltips,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -2765,14 +2762,40 @@ impl SettingsTab {
             SettingsTab::Effects => "Effects",
             SettingsTab::Inventory => "Inventory",
             SettingsTab::Armor => "Armour",
-            SettingsTab::Captions => "Captions",
             SettingsTab::Coords => "Coordinates",
             SettingsTab::Keys => "Keys",
             SettingsTab::Info => "Info",
             SettingsTab::Health => "Health",
             SettingsTab::Held => "Held",
-            SettingsTab::Vanilla => "Vanilla HUD",
-            SettingsTab::Tooltips => "Tooltips",
+        }
+    }
+    /// The module this card belongs to. General has none.
+    pub fn module(self) -> Option<ModuleId> {
+        match self {
+            SettingsTab::AppleSkin => Some(ModuleId::AppleSkin),
+            SettingsTab::Effects => Some(ModuleId::Effects),
+            SettingsTab::Inventory => Some(ModuleId::Inventory),
+            SettingsTab::Armor => Some(ModuleId::Armor),
+            SettingsTab::Coords => Some(ModuleId::Coords),
+            SettingsTab::Keys => Some(ModuleId::Keys),
+            SettingsTab::Info => Some(ModuleId::Info),
+            SettingsTab::Health => Some(ModuleId::Health),
+            SettingsTab::Held => Some(ModuleId::Held),
+            SettingsTab::General => None,
+        }
+    }
+    /// The card for a module, so selecting a module on the canvas is enough.
+    pub fn of_module(id: ModuleId) -> Self {
+        match id {
+            ModuleId::AppleSkin => SettingsTab::AppleSkin,
+            ModuleId::Effects => SettingsTab::Effects,
+            ModuleId::Inventory => SettingsTab::Inventory,
+            ModuleId::Armor => SettingsTab::Armor,
+            ModuleId::Coords => SettingsTab::Coords,
+            ModuleId::Keys => SettingsTab::Keys,
+            ModuleId::Info => SettingsTab::Info,
+            ModuleId::Health => SettingsTab::Health,
+            ModuleId::Held => SettingsTab::Held,
         }
     }
     fn section(self) -> &'static str {
@@ -2782,14 +2805,11 @@ impl SettingsTab {
             SettingsTab::Effects => "Effect timers",
             SettingsTab::Inventory => "Inventory",
             SettingsTab::Armor => "Armour & durability",
-            SettingsTab::Captions => "Captions",
             SettingsTab::Coords => "Coordinates",
             SettingsTab::Keys => "Keystrokes",
             SettingsTab::Info => "Performance & time",
             SettingsTab::Health => "Player vitals",
             SettingsTab::Held => "Held items",
-            SettingsTab::Vanilla => "Vanilla HUD",
-            SettingsTab::Tooltips => "Tooltips",
         }
     }
 }
@@ -2811,6 +2831,15 @@ pub struct EditorState {
     pub scroll: i32,
     pub page: EditorPage,
     pub settings_tab: SettingsTab,
+    /// Whether the options card is open beside the selected module (or at the
+    /// top-left for General).
+    pub settings_open: bool,
+    /// The card's own scroll, kept apart from the vanilla list's.
+    pub card_scroll: i32,
+    /// The card row with the keyboard focus.
+    pub settings_row: usize,
+    /// A reset row that asked for a second click, cleared by any other action.
+    pub settings_confirm: Option<Action>,
 }
 
 impl Default for EditorState {
@@ -2824,13 +2853,17 @@ impl Default for EditorState {
             scroll: 0,
             page: EditorPage::Mods,
             settings_tab: SettingsTab::General,
+            settings_open: false,
+            card_scroll: 0,
+            settings_row: 0,
+            settings_confirm: None,
         }
     }
 }
 
 thread_local! {
     static MODE: std::cell::Cell<ScreenMode> = const { std::cell::Cell::new(ScreenMode::Closed) };
-    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods, settings_tab: SettingsTab::General }) };
+    static EDITOR: std::cell::Cell<EditorState> = const { std::cell::Cell::new(EditorState { selected: None, drag: None, selected_vanilla: None, drag_vanilla: None, grab: [0.0; 2], scroll: 0, page: EditorPage::Mods, settings_tab: SettingsTab::General, settings_open: false, card_scroll: 0, settings_row: 0, settings_confirm: None }) };
     static RECTS: std::cell::RefCell<Vec<(ModuleId, Rect)>> = const { std::cell::RefCell::new(Vec::new()) };
     static PENDING: std::cell::Cell<Option<ScreenMode>> = const { std::cell::Cell::new(None) };
 }
@@ -3033,6 +3066,20 @@ pub fn draw_modules(
                     with_alpha(col.header, 230),
                 );
                 txt(p, cfg, &label, x + 3.0, r.y - 9.0, col.text, 1.0);
+                // The options card is one click from the module it belongs
+                // to: the chip names it and Enter does the same.
+                let chip = editor_options_chip(r, screen);
+                rounded_fill(p, chip, with_alpha(col.accent, 170));
+                let cw = p.width("Options") * 0.72;
+                txt(
+                    p,
+                    cfg,
+                    "Options",
+                    chip.x + (chip.w - cw) / 2.0,
+                    chip.y + 1.5,
+                    col.header,
+                    0.72,
+                );
             }
         }
         out.push((id, r));
@@ -4696,8 +4743,8 @@ fn draw_editor_footer(p: &mut dyn Painter, cfg: &Config, rects: &[(ModuleId, Rec
     let _ = rects;
     // The hotbar sits in the middle of the bottom edge, so the keys live in
     // the corner beside it: the live HUD stays visible while it is placed.
-    let hint = "Drag  ·  Wheel scales  ·  RMB on/off";
-    let hint2 = "Arrows nudge  ·  Space  ·  R reset  ·  Esc";
+    let hint = "Drag  ·  Wheel scales  ·  RMB on/off  ·  Enter options";
+    let hint2 = "Arrows nudge  ·  Space  ·  R reset  ·  N general  ·  Esc";
     let mut w = p.width(hint) * 0.78;
     if cfg.show_help {
         w = w.max(p.width(hint2) * 0.78);
@@ -5147,6 +5194,20 @@ prev_impl!(View);
 prev_impl!(EmptyMode);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowKind {
+    /// A switch: on or off.
+    Toggle,
+    /// A number with a smaller and a larger step.
+    Value,
+    /// One of a list of named options.
+    Choice,
+    /// Opens another page or screen.
+    Action,
+    /// Wipes a layout: the first click asks, the second one does it.
+    Danger,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Module(ModuleId, ModField),
     Toggle(Flag),
@@ -5154,18 +5215,94 @@ pub enum Action {
     Choice(Pick),
     ResetLayout,
     ResetAll,
-    OpenLayout,
     OpenVanilla,
-    OpenCaptions,
-    CaptionOn,
-    CaptionX,
-    CaptionY,
-    CaptionScale,
-    CaptionReset,
     CloseScreen,
 }
 
 impl Action {
+    /// How a row draws and reacts: a switch, a stepper, a choice, a button,
+    /// or a reset that needs confirming.
+    pub fn kind(self) -> RowKind {
+        match self {
+            Action::Module(_, ModField::Enabled)
+            | Action::Module(_, ModField::Background)
+            | Action::Module(_, ModField::Border)
+            | Action::Toggle(_) => RowKind::Toggle,
+            Action::Module(_, ModField::Scale) | Action::Amount(_) => RowKind::Value,
+            Action::Module(_, ModField::Anchor) | Action::Choice(_) => RowKind::Choice,
+            Action::ResetLayout | Action::ResetAll => RowKind::Danger,
+            Action::OpenVanilla | Action::CloseScreen => RowKind::Action,
+        }
+    }
+    pub fn is_dangerous(self) -> bool {
+        self.kind() == RowKind::Danger
+    }
+    /// Puts one row back to its default, without touching the rest of the
+    /// configuration. False for rows that are not values.
+    pub fn reset(self, c: &mut Config) -> bool {
+        let d = Config::default();
+        match self {
+            Action::Module(id, field) => {
+                let default = *d.module(id);
+                let m = c.module_mut(id);
+                let same = match field {
+                    ModField::Enabled => m.enabled == default.enabled,
+                    ModField::Anchor => m.anchor == default.anchor,
+                    ModField::Scale => (m.scale - default.scale).abs() < 0.0001,
+                    ModField::Background => m.background == default.background,
+                    ModField::Border => m.border == default.border,
+                };
+                if same {
+                    return false;
+                }
+                match field {
+                    ModField::Enabled => m.enabled = default.enabled,
+                    ModField::Anchor => m.anchor = default.anchor,
+                    ModField::Scale => m.scale = default.scale,
+                    ModField::Background => m.background = default.background,
+                    ModField::Border => m.border = default.border,
+                }
+                true
+            }
+            Action::Toggle(f) => {
+                let old = f.get(c);
+                let new = f.get(&d);
+                if old == new {
+                    return false;
+                }
+                f.set(c, new);
+                true
+            }
+            Action::Amount(n) => {
+                let old = n.get(c);
+                let new = n.get(&d);
+                if (old - new).abs() < 0.0001 {
+                    return false;
+                }
+                n.set(c, new);
+                true
+            }
+            // Choices have no common setter: walk the cycle to the default's
+            // label. Every choice list is short, so this stays cheap.
+            Action::Choice(p) => {
+                let target = p.label(&d);
+                let mut changed = false;
+                for _ in 0..64 {
+                    if p.label(c) == target {
+                        break;
+                    }
+                    if !p.change(c, 1) {
+                        break;
+                    }
+                    changed = true;
+                }
+                changed
+            }
+            Action::ResetLayout | Action::ResetAll | Action::OpenVanilla | Action::CloseScreen => {
+                false
+            }
+        }
+    }
     pub fn value(self, c: &Config) -> String {
         match self {
             Action::Module(id, field) => {
@@ -5184,18 +5321,6 @@ impl Action {
                 }
             }
             Action::Toggle(f) => (if f.get(c) { "ON" } else { "OFF" }).into(),
-            Action::CaptionOn => {
-                if c.vanilla.get(VanillaId::Subtitle).on {
-                    "ON".into()
-                } else {
-                    "OFF".into()
-                }
-            }
-            Action::CaptionX => format!("{:.0}", c.vanilla.get(VanillaId::Subtitle).offset[0]),
-            Action::CaptionY => format!("{:.0}", c.vanilla.get(VanillaId::Subtitle).offset[1]),
-            Action::CaptionScale => {
-                format!("{:.2}x", c.vanilla.get(VanillaId::Subtitle).scale)
-            }
             Action::Amount(n) => {
                 let v = n.get(c);
                 let (_, _, step) = n.range();
@@ -5249,34 +5374,6 @@ impl Action {
                 true
             }
             Action::Choice(p) => p.change(c, delta),
-            Action::CaptionOn => {
-                let el = c.vanilla.get_mut(VanillaId::Subtitle);
-                el.on = !el.on;
-                true
-            }
-            Action::CaptionX | Action::CaptionY => {
-                let step = if c.snap { f32::from(c.grid) } else { 1.0 };
-                let d = step * delta.signum() as f32;
-                let el = c.vanilla.get_mut(VanillaId::Subtitle);
-                if matches!(self, Action::CaptionX) {
-                    el.offset[0] = (el.offset[0] + d).clamp(-4096.0, 4096.0);
-                } else {
-                    el.offset[1] = (el.offset[1] + d).clamp(-4096.0, 4096.0);
-                }
-                el.on = true;
-                true
-            }
-            Action::CaptionScale => {
-                let el = c.vanilla.get_mut(VanillaId::Subtitle);
-                let next = el.scale + 0.05 * delta.signum() as f32;
-                el.scale = (next * 100.0).round().clamp(25.0, 400.0) / 100.0;
-                el.on = true;
-                true
-            }
-            Action::CaptionReset => {
-                *c.vanilla.get_mut(VanillaId::Subtitle) = VanillaElement::default();
-                true
-            }
             Action::ResetLayout => {
                 c.reset_layout();
                 true
@@ -5285,25 +5382,12 @@ impl Action {
                 *c = Config::default();
                 true
             }
-            Action::OpenLayout => {
-                edit_editor(|e| e.page = EditorPage::Mods);
-                set_pending(ScreenMode::Layout);
-                false
-            }
             Action::OpenVanilla => {
                 edit_editor(|e| {
                     e.page = EditorPage::Vanilla;
                     e.selected_vanilla = e.selected_vanilla.or(Some(VanillaId::Hotbar));
+                    e.settings_open = false;
                 });
-                set_pending(ScreenMode::Layout);
-                false
-            }
-            Action::OpenCaptions => {
-                edit_editor(|e| {
-                    e.page = EditorPage::Vanilla;
-                    e.selected_vanilla = Some(VanillaId::Subtitle);
-                });
-                set_pending(ScreenMode::Layout);
                 false
             }
             Action::CloseScreen => {
@@ -5343,19 +5427,17 @@ fn all_setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     rows.push((Choice(P::SettingsHotkey), "Settings hotkey", "General"));
     rows.push((Toggle(F::ShowHelp), "Show hints", "General"));
     rows.push((Choice(P::EmptyMode), "Empty modules", "General"));
+    rows.push((Toggle(F::VanillaHud), "Move vanilla HUD", "General"));
+    rows.push((Toggle(F::TooltipFood), "Food values in tooltips", "General"));
+    rows.push((
+        Toggle(F::TooltipSneak),
+        "Sneak details in tooltips",
+        "General",
+    ));
+    rows.push((OpenVanilla, "Edit vanilla HUD", "General"));
     rows.push((ResetLayout, "Reset layout", "General"));
     rows.push((ResetAll, "Reset everything", "General"));
-    rows.push((OpenLayout, "Open layout editor", "General"));
-    rows.push((OpenVanilla, "Edit vanilla HUD", "General"));
-    rows.push((CloseScreen, "Close settings", "General"));
-    rows.push((Toggle(F::VanillaHud), "Move vanilla HUD", "Vanilla HUD"));
-
-    rows.push((CaptionOn, "Move captions", "Captions"));
-    rows.push((CaptionX, "Horizontal offset", "Captions"));
-    rows.push((CaptionY, "Vertical offset", "Captions"));
-    rows.push((CaptionScale, "Scale", "Captions"));
-    rows.push((CaptionReset, "Reset captions", "Captions"));
-    rows.push((OpenCaptions, "Edit on the vanilla page", "Captions"));
+    rows.push((CloseScreen, "Close editor", "General"));
 
     module(&mut rows, M::AppleSkin);
     rows.push((Toggle(F::AppleSaturation), "Saturation", "AppleSkin"));
@@ -5460,8 +5542,6 @@ fn all_setting_rows() -> Vec<(Action, &'static str, &'static str)> {
     rows.push((Toggle(F::HeldTotems), "Totem count", "Held items"));
     rows.push((Toggle(F::HeldCounts), "Stack counts", "Held items"));
 
-    rows.push((Toggle(F::TooltipFood), "Food values", "Tooltips"));
-    rows.push((Toggle(F::TooltipSneak), "Sneak details", "Tooltips"));
     rows
 }
 
@@ -5475,6 +5555,50 @@ pub struct SettingLine {
     pub text: String,
     pub action: Option<Action>,
     pub value: String,
+    pub kind: RowKind,
+}
+
+impl SettingLine {
+    /// One short sentence for the footer: what the highlighted row does.
+    pub fn hint(&self) -> &'static str {
+        let special = match self.text.as_str() {
+            "Enabled" => "Show or hide this module on the HUD.",
+            "View" => "Preset: Minimal, Compact, Standard or Full.",
+            "Anchor" => "Where the module sits: nine screen positions.",
+            "Scale" => "Size of this module.",
+            "Background" => "Panel drawn behind the module.",
+            "Border" => "Outline drawn around the module.",
+            "HUD enabled" => "Master switch for everything HUD+ draws.",
+            "Profile" => "A ready-made set of views for every module.",
+            "Theme" => "Colours shared by modules and panels.",
+            "Opacity" => "How solid module backgrounds look.",
+            "Text shadow" => "Shadow behind HUD text for readability.",
+            "Snap to grid" => "Round dragged modules to the grid.",
+            "Grid" => "Grid step used while dragging.",
+            "Layout hotkey" => "Key that opens the layout editor.",
+            "Settings hotkey" => "Key that opens the General card.",
+            "Show hints" => "Draw these key hints on screen.",
+            "Empty modules" => "Hide empty modules, or keep their space.",
+            "Reset layout" => "Moves every module back to its default place.",
+            "Reset everything" => "Restores every HUD+ setting to its default.",
+            "Edit vanilla HUD" => "Move and scale Minecraft's own HUD.",
+            "Close editor" => "Return to the game.",
+            "Move vanilla HUD" => "Let HUD+ move Minecraft's widgets.",
+            "Food values in tooltips" => "Show hunger and saturation on food tooltips.",
+            "Sneak details in tooltips" => "Show the sneak state on block tooltips.",
+            _ => "",
+        };
+        if !special.is_empty() {
+            return special;
+        }
+        match self.kind {
+            RowKind::Toggle => "Click to turn this on or off.",
+            RowKind::Value => "Click the arrows to decrease or increase.",
+            RowKind::Choice => "Click the arrows to cycle the options.",
+            RowKind::Action => "Click to open.",
+            RowKind::Danger => "This resets your setup: click twice to confirm.",
+        }
+    }
 }
 
 /// One page's rows: only the options under `tab`, without the section header
@@ -5487,181 +5611,314 @@ pub fn setting_lines(cfg: &Config, tab: SettingsTab) -> Vec<SettingLine> {
             text: label.into(),
             action: Some(action),
             value: action.value(cfg),
+            kind: action.kind(),
         })
         .collect()
 }
 
-pub struct SettingsView {
-    pub panel: Rect,
-    pub rail: Rect,
+/// The options card: a small panel that opens beside the selected module, or
+/// at the top-left for General. It never covers the whole screen, so the HUD
+/// stays readable while a value is changed.
+pub struct CardView {
+    pub card: Rect,
     pub list: Rect,
     pub row_h: f32,
-    pub tab_h: f32,
     pub first: usize,
     pub visible: usize,
     pub lines: usize,
 }
 
-/// Settings rows are deliberately tighter than the layout editor's list: the
-/// panel sits on the right and the world behind it stays visible.
-const SETTINGS_ROW_H: f32 = 13.0;
-const SETTINGS_RAIL_W: f32 = 92.0;
+/// Rows are real controls, so they stay comfortably tall.
+const CARD_ROW_H: f32 = 20.0;
+const CARD_HEADER_H: f32 = 20.0;
+const CARD_FOOTER_H: f32 = 16.0;
+const CARD_W: f32 = 232.0;
+/// The width of the value/stepper or switch area on the right of a row.
+const CARD_CONTROL_W: f32 = 76.0;
+const CARD_MARGIN: f32 = 6.0;
+/// Cards hang below the top bar, clear of the editor tabs.
+const CARD_TOP: f32 = 24.0;
 
-pub fn settings_view(screen: (f32, f32), lines: usize, scroll: i32) -> SettingsView {
+/// The box the card should sit beside: the selected module's drawn box, or
+/// nothing for General.
+fn card_anchor(tab: SettingsTab) -> Option<Rect> {
+    let id = tab.module()?;
+    rects()
+        .into_iter()
+        .find(|(module, _)| *module == id)
+        .map(|(_, r)| r)
+}
+
+pub fn card_view(screen: (f32, f32), tab: SettingsTab, lines: usize, scroll: i32) -> CardView {
     let (sw, sh) = screen;
-    // A compact panel on the right: no full-screen veil, so the game stays
-    // readable while a value is changed.
-    let w = (sw * 0.52).clamp(280.0, 460.0);
-    let h = (sh - 12.0).max(96.0);
-    let panel = Rect::new(sw - w - 6.0, 6.0, w, h);
-    let title_h = 18.0;
-    let footer_h = 17.0;
-    let body_h = (panel.h - title_h - footer_h).max(SETTINGS_ROW_H);
-    let rail = Rect::new(
-        panel.x + 4.0,
-        panel.y + title_h,
-        SETTINGS_RAIL_W.min(panel.w * 0.34),
-        body_h,
-    );
+    let max_h = (sh - CARD_TOP - CARD_MARGIN).max(CARD_HEADER_H + CARD_FOOTER_H + CARD_ROW_H);
+    let want = CARD_HEADER_H + CARD_FOOTER_H + lines.max(1) as f32 * CARD_ROW_H;
+    let h = want.min(max_h);
+    let visible = (((h - CARD_HEADER_H - CARD_FOOTER_H) / CARD_ROW_H).floor() as usize).max(1);
+    let w = CARD_W.min((sw - CARD_MARGIN * 2.0).max(120.0));
+    let anchor = card_anchor(tab);
+    let (x, y) = match anchor {
+        // Right of the module when there is room, left otherwise.
+        Some(a) if a.w > 0.0 => {
+            let right = a.right() + CARD_MARGIN;
+            let x = if right + w <= sw - CARD_MARGIN {
+                right
+            } else {
+                a.x - CARD_MARGIN - w
+            };
+            (x, a.y)
+        }
+        _ => (CARD_MARGIN, CARD_TOP),
+    };
+    let x = x.clamp(CARD_MARGIN, (sw - w - CARD_MARGIN).max(CARD_MARGIN));
+    let y = y.clamp(CARD_TOP, (sh - h - CARD_MARGIN).max(CARD_TOP));
+    let card = Rect::new(x, y, w, h);
     let list = Rect::new(
-        rail.right() + 5.0,
-        panel.y + title_h,
-        (panel.right() - 6.0) - (rail.right() + 5.0),
-        body_h,
+        card.x + 4.0,
+        card.y + CARD_HEADER_H,
+        card.w - 8.0,
+        h - CARD_HEADER_H - CARD_FOOTER_H,
     );
-    let tab_h = (rail.h / SettingsTab::ALL.len() as f32).clamp(10.0, 16.0);
-    let visible = (list.h / SETTINGS_ROW_H).floor().max(1.0) as usize;
     let max_first = lines.saturating_sub(visible);
     let first = (scroll.max(0) as usize).min(max_first);
-    SettingsView {
-        panel,
-        rail,
+    CardView {
+        card,
         list,
-        row_h: SETTINGS_ROW_H,
-        tab_h,
+        row_h: CARD_ROW_H,
         first,
         visible,
         lines,
     }
 }
 
-/// The rail tab under `at`, with the same geometry the rail is drawn with.
-pub fn settings_tab_at(screen: (f32, f32), at: [f32; 2]) -> Option<SettingsTab> {
-    let view = settings_view(screen, 0, 0);
-    if !view.rail.contains(at) {
-        return None;
-    }
-    let row = ((at[1] - view.rail.y) / view.tab_h).floor();
-    if row < 0.0 {
-        return None;
-    }
-    SettingsTab::ALL.get(row as usize).copied()
+/// The header's close button, a plain "x" the pointer can find.
+pub fn card_close_rect(view: &CardView) -> Rect {
+    Rect::new(view.card.right() - 19.0, view.card.y + 4.0, 13.0, 12.0)
 }
 
-pub fn draw_settings(
+/// Shortens `text` until it fits `max_w`, adding "..." when it does not.
+fn fit_text(p: &dyn Painter, text: &str, max_w: f32, scale: f32) -> String {
+    if p.width(text) * scale <= max_w {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().collect();
+    while !out.is_empty() {
+        out.pop();
+        let candidate = format!("{out}...");
+        if p.width(&candidate) * scale <= max_w {
+            return candidate;
+        }
+    }
+    String::new()
+}
+
+fn keep_row_visible(row: usize, scroll: i32, visible: usize) -> i32 {
+    let scroll = scroll.max(0);
+    if row < scroll as usize {
+        row as i32
+    } else if row >= scroll as usize + visible {
+        (row + 1).saturating_sub(visible) as i32
+    } else {
+        scroll
+    }
+}
+
+pub fn draw_card(
     p: &mut dyn Painter,
     cfg: &Config,
     tab: SettingsTab,
     scroll: i32,
+    selected: usize,
     mouse: [f32; 2],
 ) {
     let col = cfg.theme.colours(cfg.opacity);
     let (sw, sh) = p.screen();
     let lines = setting_lines(cfg, tab);
-    let view = settings_view((sw, sh), lines.len(), scroll);
-    // Only the panel is painted: the world keeps its colours and brightness.
-    rounded_fill(p, view.panel, with_alpha(col.header, 228));
-    rounded_border(p, view.panel, with_alpha(col.border, 150));
+    let view = card_view((sw, sh), tab, lines.len(), scroll);
+    // Only the card is painted: the world keeps its colours and brightness.
+    rounded_fill(p, view.card, with_alpha(col.header, 240));
+    rounded_border(p, view.card, with_alpha(col.border, 170));
     p.fill(
-        Rect::new(
-            view.panel.x + 2.0,
-            view.panel.y + 1.0,
-            view.panel.w - 4.0,
-            2.0,
-        ),
-        with_alpha(col.accent, 190),
+        Rect::new(view.card.x + 2.0, view.card.y + 1.0, view.card.w - 4.0, 2.0),
+        with_alpha(col.accent, 200),
     );
-    let title = format!("HUD+ 5 · {}", tab.label());
+
+    // Header: which card this is, and the way out.
+    let title = format!("{NAME} {VERSION}");
     txt(
         p,
         cfg,
         &title,
-        view.panel.x + 7.0,
-        view.panel.y + 5.0,
+        view.card.x + 8.0,
+        view.card.y + 7.0,
         col.accent,
-        1.0,
+        0.66,
     );
-    let profile = format!("{} · {} on", cfg.profile.label(), enabled_count(cfg));
-    let pw = p.width(&profile) * 0.72;
+    let title_x = view.card.x + 8.0 + p.width(&title) * 0.66 + 6.0;
     txt(
         p,
         cfg,
-        &profile,
-        view.panel.right() - 7.0 - pw,
-        view.panel.y + 6.0,
-        col.muted,
-        0.72,
+        tab.label(),
+        title_x,
+        view.card.y + 4.0,
+        col.text,
+        0.88,
     );
-    // The rail: every module and HUD area gets its own page.
-    p.fill(view.rail, with_alpha(col.border, 22));
-    for (i, id) in SettingsTab::ALL.iter().enumerate() {
-        let r = Rect::new(
-            view.rail.x,
-            view.rail.y + i as f32 * view.tab_h,
-            view.rail.w,
-            view.tab_h,
-        );
-        let on = *id == tab;
-        if on {
-            rounded_fill(p, r, with_alpha(col.accent, 205));
-        } else if r.contains(mouse) {
-            rounded_fill(p, r, with_alpha(col.accent, 34));
-        }
-        txt(
-            p,
-            cfg,
-            id.label(),
-            r.x + 4.0,
-            r.y + (r.h - 9.0) / 2.0,
-            if on { col.header } else { col.text },
-            0.76,
-        );
-    }
+    let close = card_close_rect(&view);
+    rounded_fill(p, close, with_alpha(col.border, 35));
+    rounded_border(p, close, with_alpha(col.border, 110));
+    let xw = p.width("x") * 0.8;
+    txt(
+        p,
+        cfg,
+        "x",
+        close.x + (close.w - xw) / 2.0,
+        close.y + 1.0,
+        if close.contains(mouse) {
+            col.bad
+        } else {
+            col.muted
+        },
+        0.8,
+    );
     p.fill(
-        Rect::new(view.rail.right() + 1.0, view.rail.y, 0.5, view.rail.h),
-        with_alpha(col.border, 50),
+        Rect::new(
+            view.card.x + 5.0,
+            view.card.y + CARD_HEADER_H - 1.0,
+            view.card.w - 10.0,
+            1.0,
+        ),
+        with_alpha(col.border, 65),
     );
+
+    // Rows: label on the left, a real control on the right.
+    let control_x = view.list.right() - CARD_CONTROL_W;
+    let hovered = card_row_at(&view, mouse);
+    let selected = selected.min(lines.len().saturating_sub(1));
     let mut y = view.list.y;
-    for line in lines.iter().skip(view.first).take(view.visible) {
+    for (i, line) in lines.iter().enumerate().skip(view.first).take(view.visible) {
         let row = Rect::new(view.list.x, y, view.list.w, view.row_h);
-        if row.contains(mouse) {
-            rounded_fill(p, row, with_alpha(col.accent, 38));
-        }
-        txt(
-            p,
-            cfg,
-            &line.text,
-            view.list.x + 2.0,
-            y + 1.5,
-            col.text,
-            0.86,
-        );
-        if !line.value.is_empty() {
-            let vw = p.width(&line.value) * 0.86;
-            txt(
-                p,
-                cfg,
-                &line.value,
-                view.list.right() - 4.0 - vw,
-                y + 1.5,
-                col.accent,
-                0.86,
+        if i == selected && !lines.is_empty() {
+            rounded_fill(p, row, with_alpha(col.accent, 30));
+            p.fill(
+                Rect::new(row.x, row.y + 3.0, 2.0, row.h - 6.0),
+                with_alpha(col.accent, 220),
             );
+        } else if Some(i) == hovered {
+            rounded_fill(p, row, with_alpha(col.accent, 18));
+        }
+        p.fill(
+            Rect::new(row.x + 7.0, row.bottom() - 1.0, row.w - 14.0, 1.0),
+            with_alpha(col.border, 20),
+        );
+
+        let armed = editor().settings_confirm == line.action;
+        let danger = line.kind == RowKind::Danger;
+        let color = if danger { col.bad } else { col.text };
+        let ly = row.y + (row.h - 9.0 * 0.84) / 2.0;
+        let label = fit_text(p, &line.text, control_x - row.x - 14.0, 0.84);
+        txt(p, cfg, &label, row.x + 7.0, ly, color, 0.84);
+
+        match line.kind {
+            RowKind::Toggle => {
+                let on = line.value == "ON";
+                let pill = Rect::new(view.list.right() - 30.0, row.y + 4.0, 24.0, 12.0);
+                rounded_fill(
+                    p,
+                    pill,
+                    if on {
+                        with_alpha(col.accent, 210)
+                    } else {
+                        with_alpha(col.border, 45)
+                    },
+                );
+                rounded_border(
+                    p,
+                    pill,
+                    if on {
+                        with_alpha(col.accent, 240)
+                    } else {
+                        with_alpha(col.border, 95)
+                    },
+                );
+                let knob_x = if on { pill.right() - 9.0 } else { pill.x + 1.0 };
+                rounded_fill(
+                    p,
+                    Rect::new(knob_x, pill.y + 1.0, 8.0, 10.0),
+                    if on { col.header } else { col.muted },
+                );
+                let text = if on { "ON" } else { "OFF" };
+                let tw = p.width(text) * 0.66;
+                txt(
+                    p,
+                    cfg,
+                    text,
+                    pill.x - 5.0 - tw,
+                    row.y + (row.h - 9.0 * 0.66) / 2.0,
+                    if on { col.accent } else { col.muted },
+                    0.66,
+                );
+            }
+            RowKind::Value | RowKind::Choice => {
+                let left = Rect::new(control_x, row.y, 13.0, row.h);
+                let right = Rect::new(view.list.right() - 14.0, row.y, 14.0, row.h);
+                if left.contains(mouse) {
+                    rounded_fill(p, left, with_alpha(col.accent, 55));
+                }
+                if right.contains(mouse) {
+                    rounded_fill(p, right, with_alpha(col.accent, 55));
+                }
+                let cy = row.y + (row.h - 9.0) / 2.0;
+                let lx = left.x + (left.w - p.width("<")) / 2.0;
+                let rx = right.x + (right.w - p.width(">")) / 2.0;
+                txt(p, cfg, "<", lx, cy, col.accent, 1.0);
+                txt(p, cfg, ">", rx, cy, col.accent, 1.0);
+                let value = fit_text(p, &line.value, right.x - left.right() - 3.0, 0.76);
+                let vw = p.width(&value) * 0.76;
+                txt(
+                    p,
+                    cfg,
+                    &value,
+                    right.x - 3.0 - vw,
+                    row.y + (row.h - 9.0 * 0.76) / 2.0,
+                    col.accent,
+                    0.76,
+                );
+            }
+            RowKind::Danger => {
+                if armed {
+                    let text = "CONFIRM";
+                    let tw = p.width(text) * 0.66;
+                    txt(
+                        p,
+                        cfg,
+                        text,
+                        view.list.right() - 6.0 - tw,
+                        row.y + (row.h - 9.0 * 0.66) / 2.0,
+                        col.bad,
+                        0.66,
+                    );
+                }
+            }
+            RowKind::Action => {
+                let arrow = ">";
+                let aw = p.width(arrow) * 0.9;
+                txt(
+                    p,
+                    cfg,
+                    arrow,
+                    view.list.right() - 9.0 - aw,
+                    row.y + (row.h - 9.0 * 0.9) / 2.0,
+                    col.accent,
+                    0.9,
+                );
+            }
         }
         y += view.row_h;
     }
+
     if view.lines > view.visible {
-        let track = Rect::new(view.panel.right() - 4.0, view.list.y, 2.0, view.list.h);
+        let track = Rect::new(view.card.right() - 4.0, view.list.y, 2.0, view.list.h);
         p.fill(track, with_alpha(col.border, 40));
         let frac = view.visible as f32 / view.lines as f32;
         let thumb = (track.h * frac).max(12.0);
@@ -5671,48 +5928,37 @@ pub fn draw_settings(
             with_alpha(col.accent, 210),
         );
     }
-    let more = format!(
-        "{} / {}",
-        (view.first + view.visible).min(view.lines),
-        view.lines
+
+    // Footer: what the focused row does, then the keys that work here.
+    let foot_y = view.card.bottom() - CARD_FOOTER_H;
+    p.fill(
+        Rect::new(view.card.x + 5.0, foot_y, view.card.w - 10.0, 1.0),
+        with_alpha(col.border, 55),
     );
-    let mw = p.width(&more) * 0.75;
+    let focus = hovered.or(if lines.is_empty() {
+        None
+    } else {
+        Some(selected)
+    });
+    let hint = match focus {
+        Some(i) if editor().settings_confirm == lines[i].action => "Click again to confirm.",
+        Some(i) => lines[i].hint(),
+        None => "Point at a row to see what it does.",
+    };
+    let hint_text = fit_text(p, hint, view.card.w - 18.0, 0.66);
     txt(
         p,
         cfg,
-        &more,
-        view.panel.right() - 8.0 - mw,
-        view.panel.bottom() - 12.0,
-        col.muted,
-        0.75,
+        &hint_text,
+        view.card.x + 8.0,
+        foot_y + 4.0,
+        with_alpha(col.text, 220),
+        0.66,
     );
-    if cfg.show_help {
-        let hint = if view.lines > view.visible {
-            "Click: change · Wheel: scroll · Esc: close"
-        } else {
-            "Click: change · Esc: close"
-        };
-        txt(
-            p,
-            cfg,
-            hint,
-            view.panel.x + 7.0,
-            view.panel.bottom() - 12.0,
-            col.muted,
-            0.72,
-        );
-    }
 }
 
-pub fn enabled_count(cfg: &Config) -> usize {
-    ModuleId::ALL
-        .iter()
-        .filter(|id| cfg.module(**id).enabled)
-        .count()
-}
-
-/// The line index under `at`, with the same geometry the list is drawn with.
-fn settings_row_at(view: &SettingsView, at: [f32; 2]) -> Option<usize> {
+/// The row index under `at`, with the same geometry the card is drawn with.
+fn card_row_at(view: &CardView, at: [f32; 2]) -> Option<usize> {
     if !view.list.contains(at) {
         return None;
     }
@@ -5724,27 +5970,10 @@ fn settings_row_at(view: &SettingsView, at: [f32; 2]) -> Option<usize> {
     (i < view.lines).then_some(i)
 }
 
-/// Handles a click on the active tab's list. False when it hit nothing.
-pub fn settings_click(
-    screen: (f32, f32),
-    tab: SettingsTab,
-    scroll: i32,
-    cfg: &Config,
-    at: [f32; 2],
-    button: i32,
-) -> bool {
-    let lines = setting_lines(cfg, tab);
-    let view = settings_view(screen, lines.len(), scroll);
-    let Some(i) = settings_row_at(&view, at) else {
-        return false;
-    };
-    let Some(action) = lines[i].action else {
-        return false;
-    };
-    let delta = if button == 1 { -1 } else { 1 };
-    // A profile or a full reset sets the profile itself; everything else
-    // makes the configuration custom.
-    let changed = match action {
+/// Applies one row change. A profile or a full reset replaces the whole
+/// configuration; everything else edits it and marks the profile custom.
+fn apply_action(cfg: &Config, action: Action, delta: i32) -> bool {
+    match action {
         Action::Choice(Pick::Profile) | Action::ResetAll => {
             let mut next = *cfg;
             let changed = action.change(&mut next, delta);
@@ -5754,23 +5983,193 @@ pub fn settings_click(
             changed
         }
         _ => edit_config(|c| action.change(c, delta)),
+    }
+}
+
+/// Handles a click while the card is open. False only when there is no card.
+pub fn card_click(screen: (f32, f32), cfg: &Config, at: [f32; 2], button: i32) -> bool {
+    if !editor().settings_open {
+        return false;
+    }
+    let tab = editor().settings_tab;
+    let lines = setting_lines(cfg, tab);
+    let view = card_view(screen, tab, lines.len(), editor().card_scroll);
+    if card_close_rect(&view).contains(at) {
+        edit_editor(|e| {
+            e.settings_open = false;
+            e.settings_confirm = None;
+        });
+        return true;
+    }
+    let Some(i) = card_row_at(&view, at) else {
+        // A click anywhere else closes the card instead of reaching the
+        // canvas underneath: the card is a mode, and one click leaves it.
+        if !view.card.contains(at) {
+            edit_editor(|e| {
+                e.settings_open = false;
+                e.settings_confirm = None;
+            });
+            return true;
+        }
+        return true;
     };
-    let _ = changed;
+    let Some(action) = lines[i].action else {
+        return true;
+    };
+    edit_editor(|e| e.settings_row = i);
+    let armed = editor().settings_confirm == Some(action);
+    if action.is_dangerous() && !armed {
+        // The first click only asks: a reset row is a footgun otherwise.
+        edit_editor(|e| e.settings_confirm = Some(action));
+        return true;
+    }
+    edit_editor(|e| e.settings_confirm = None);
+    let row_y = view.list.y + (i - view.first) as f32 * view.row_h;
+    let left = Rect::new(view.list.right() - CARD_CONTROL_W, row_y, 13.0, view.row_h);
+    let right = Rect::new(view.list.right() - 14.0, row_y, 14.0, view.row_h);
+    let stepper = matches!(action.kind(), RowKind::Value | RowKind::Choice);
+    let delta = if stepper && left.contains(at) {
+        -1
+    } else if stepper && right.contains(at) {
+        1
+    } else if button == 1 {
+        -1
+    } else {
+        1
+    };
+    let _ = apply_action(cfg, action, delta);
     true
 }
 
-/// Scrolls the active tab's list by `steps`, kept within the list.
-pub fn settings_scroll(
-    screen: (f32, f32),
-    tab: SettingsTab,
-    scroll: i32,
-    steps: f32,
-    cfg: &Config,
-) -> i32 {
+/// Scrolls the card's list by `steps`. True when the card is open.
+pub fn card_scroll(screen: (f32, f32), cfg: &Config, steps: f32) -> bool {
+    if !editor().settings_open {
+        return false;
+    }
+    let tab = editor().settings_tab;
     let lines = setting_lines(cfg, tab).len();
-    let view = settings_view(screen, lines, 0);
+    let view = card_view(screen, tab, lines, 0);
     let max_first = lines.saturating_sub(view.visible) as i32;
-    (scroll - steps.round() as i32).clamp(0, max_first)
+    let scroll = (editor().card_scroll - steps.round() as i32).clamp(0, max_first);
+    edit_editor(|e| e.card_scroll = scroll);
+    true
+}
+
+/// The card's keys: move, change, reset, close. True when handled.
+pub fn card_key(screen: (f32, f32), cfg: &Config, key: &str) -> bool {
+    if !editor().settings_open {
+        return false;
+    }
+    let e = editor();
+    let tab = e.settings_tab;
+    if key == "key.keyboard.escape" {
+        edit_editor(|e| {
+            e.settings_open = false;
+            e.settings_confirm = None;
+        });
+        return true;
+    }
+    let lines = setting_lines(cfg, tab);
+    if lines.is_empty() {
+        return false;
+    }
+    let view = card_view(screen, tab, lines.len(), e.card_scroll);
+    let mut row = e.settings_row.min(lines.len() - 1);
+    let mut scroll = e.card_scroll;
+    match key {
+        "key.keyboard.up" => row = row.saturating_sub(1),
+        "key.keyboard.down" => row = (row + 1).min(lines.len() - 1),
+        "key.keyboard.page.up" => row = row.saturating_sub(view.visible),
+        "key.keyboard.page.down" => row = (row + view.visible).min(lines.len() - 1),
+        "key.keyboard.home" => row = 0,
+        "key.keyboard.end" => row = lines.len() - 1,
+        "key.keyboard.left" | "key.keyboard.right" => {
+            let Some(action) = lines[row].action else {
+                return false;
+            };
+            let armed = e.settings_confirm == Some(action);
+            if action.is_dangerous() && !armed {
+                edit_editor(|e| {
+                    e.settings_row = row;
+                    e.settings_confirm = Some(action);
+                });
+                return true;
+            }
+            edit_editor(|e| {
+                e.settings_row = row;
+                e.settings_confirm = None;
+            });
+            let _ = apply_action(cfg, action, if key.ends_with("left") { -1 } else { 1 });
+            return true;
+        }
+        "key.keyboard.enter" | "key.keyboard.space" => {
+            let Some(action) = lines[row].action else {
+                return false;
+            };
+            let armed = e.settings_confirm == Some(action);
+            if action.is_dangerous() && !armed {
+                edit_editor(|e| {
+                    e.settings_row = row;
+                    e.settings_confirm = Some(action);
+                });
+                return true;
+            }
+            edit_editor(|e| {
+                e.settings_row = row;
+                e.settings_confirm = None;
+            });
+            let _ = apply_action(cfg, action, 1);
+            return true;
+        }
+        "key.keyboard.r" => {
+            let Some(action) = lines[row].action else {
+                return false;
+            };
+            if action.is_dangerous() || matches!(action, Action::OpenVanilla | Action::CloseScreen)
+            {
+                return false;
+            }
+            match action {
+                Action::Choice(Pick::Profile) => {
+                    let mut next = *cfg;
+                    if action.reset(&mut next) {
+                        set_config(next);
+                    }
+                }
+                _ => {
+                    let _ = edit_config(|c| action.reset(c));
+                }
+            }
+            edit_editor(|e| {
+                e.settings_row = row;
+                e.settings_confirm = None;
+            });
+            return true;
+        }
+        _ => return false,
+    }
+    // Movement keys: keep the focused row on screen.
+    scroll = keep_row_visible(row, scroll, view.visible);
+    edit_editor(|e| {
+        e.settings_row = row;
+        e.card_scroll = scroll;
+        e.settings_confirm = None;
+    });
+    true
+}
+
+/// Opens the card for a module, or General when `tab` has no module.
+pub fn open_card(tab: SettingsTab) {
+    edit_editor(|e| {
+        e.settings_tab = tab;
+        e.settings_open = true;
+        e.card_scroll = 0;
+        e.settings_row = 0;
+        e.settings_confirm = None;
+        if let Some(id) = tab.module() {
+            e.selected = Some(id);
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -5782,13 +6181,35 @@ pub fn settings_scroll(
 // ---------------------------------------------------------------------------
 
 pub fn editor_tabs(screen: (f32, f32)) -> [(EditorPage, Rect); 2] {
-    let w = 74.0;
-    let h = 14.0;
-    let x = (screen.0 - (w * 2.0 + 4.0)) / 2.0;
+    let w = 80.0;
+    let h = 18.0;
+    let gap = 4.0;
+    let x = (screen.0 - (w * 3.0 + gap * 2.0)) / 2.0;
     [
         (EditorPage::Mods, Rect::new(x, 4.0, w, h)),
-        (EditorPage::Vanilla, Rect::new(x + w + 4.0, 4.0, w, h)),
+        (EditorPage::Vanilla, Rect::new(x + w + gap, 4.0, w, h)),
     ]
+}
+
+/// The third top-bar button: the General card. Beside the two editor tabs so
+/// the shared options are one click away from any page.
+pub fn editor_general_tab(screen: (f32, f32)) -> Rect {
+    let [(_, _), (_, vanilla)] = editor_tabs(screen);
+    Rect::new(vanilla.right() + 4.0, vanilla.y, 80.0, vanilla.h)
+}
+
+/// The "Options" chip that sits on the selected module. Empty when nothing is
+/// selected. It hangs just below the module so it never hides its contents.
+pub fn editor_options_chip(module: Rect, screen: (f32, f32)) -> Rect {
+    let w = 44.0;
+    let h = 11.0;
+    let x = (module.right() - w).clamp(0.0, (screen.0 - w).max(0.0));
+    let y = if module.bottom() + 2.0 + h <= screen.1 {
+        module.bottom() + 2.0
+    } else {
+        (module.y - h - 2.0).max(0.0)
+    };
+    Rect::new(x, y, w, h)
 }
 
 pub fn editor_tab_at(screen: (f32, f32), at: [f32; 2]) -> Option<EditorPage> {
@@ -5904,11 +6325,43 @@ pub fn draw_editor_tabs(p: &mut dyn Painter, cfg: &Config, page: EditorPage, mou
             cfg,
             label,
             r.x + (r.w - lw) / 2.0,
-            r.y + 3.0,
+            r.y + 4.0,
             if on { col.header } else { col.text },
             0.9,
         );
     }
+    let r = editor_general_tab(screen);
+    let open = editor().settings_open && editor().settings_tab == SettingsTab::General;
+    let hovered = r.contains(mouse);
+    rounded_fill(
+        p,
+        r,
+        if open {
+            with_alpha(col.accent, 210)
+        } else {
+            with_alpha(col.header, 220)
+        },
+    );
+    rounded_border(p, r, with_alpha(col.border, 140));
+    if !open && hovered {
+        rounded_fill(p, r, with_alpha(col.accent, 36));
+    }
+    let lw = p.width("General");
+    txt(
+        p,
+        cfg,
+        "General",
+        r.x + (r.w - lw) / 2.0,
+        r.y + 4.0,
+        if open {
+            col.header
+        } else if hovered {
+            col.text
+        } else {
+            col.muted
+        },
+        0.8,
+    );
 }
 
 /// The vanilla page: real widgets stay visible under a light dim, their boxes
@@ -6222,16 +6675,35 @@ fn module_at(rects: &[(ModuleId, Rect)], at: [f32; 2]) -> Option<ModuleId> {
 /// Starts a drag (left), toggles a module (right) or cycles its anchor
 /// (middle). False when the click hit no module.
 pub fn editor_press(at: [f32; 2], button: i32) -> bool {
-    if let Some(page) = editor_tab_at(screen_size_cache(), at) {
+    let screen = screen_size_cache();
+    if let Some(page) = editor_tab_at(screen, at) {
         edit_editor(|e| {
             e.page = page;
             e.drag = None;
             e.drag_vanilla = None;
+            e.settings_open = false;
         });
         return true;
     }
+    if button == 0 && editor_general_tab(screen).contains(at) {
+        open_card(SettingsTab::General);
+        return true;
+    }
+    // The card is a mode: it takes the click before the canvas does.
+    if editor().settings_open {
+        return card_click(screen, &config(Config::default), at, button);
+    }
     if editor().page == EditorPage::Vanilla {
         return vanilla_press(at, button);
+    }
+    // The chip belongs to the selected module, so it is checked first.
+    if button == 0
+        && let Some(id) = editor().selected
+        && let Some((_, r)) = rects().iter().find(|(m, _)| *m == id)
+        && editor_options_chip(*r, screen).contains(at)
+    {
+        open_card(SettingsTab::of_module(id));
+        return true;
     }
     let rects = rects();
     let Some(id) = module_at(&rects, at) else {
@@ -6324,6 +6796,9 @@ pub fn editor_release() {
 
 /// Wheel over a module changes its scale. True when it did.
 pub fn editor_scroll(at: [f32; 2], steps: f32) -> bool {
+    if editor().settings_open {
+        return card_scroll(screen_size_cache(), &config(Config::default), steps);
+    }
     if editor().page == EditorPage::Vanilla {
         return vanilla_scroll(at, steps);
     }
@@ -6343,12 +6818,26 @@ pub fn editor_scroll(at: [f32; 2], steps: f32) -> bool {
 
 /// The editor's keys. True when the key did something.
 pub fn editor_key(key: &str) -> bool {
+    let cfg = config(Config::default);
+    if editor().settings_open {
+        return card_key(screen_size_cache(), &cfg, key);
+    }
+    if key == cfg.settings_hotkey.key() {
+        open_card(SettingsTab::General);
+        return true;
+    }
     if editor().page == EditorPage::Vanilla {
         return vanilla_key(key);
     }
-    let cfg = config(Config::default);
     let e = editor();
     match key {
+        "key.keyboard.enter" => {
+            let Some(id) = e.selected else {
+                return false;
+            };
+            open_card(SettingsTab::of_module(id));
+            true
+        }
         "key.keyboard.r" => {
             let _ = edit_config(|c| {
                 c.reset_layout();
@@ -6852,22 +7341,6 @@ mod tests {
     }
 
     #[test]
-    fn captions_have_their_own_move_and_reset_actions() {
-        let mut cfg = Config::default();
-        let original = cfg.vanilla.get(VanillaId::Subtitle);
-        Action::CaptionX.change(&mut cfg, 1);
-        assert_eq!(cfg.vanilla.get(VanillaId::Subtitle).offset, [8.0, 0.0]);
-        Action::CaptionY.change(&mut cfg, 1);
-        assert_eq!(cfg.vanilla.get(VanillaId::Subtitle).offset, [8.0, 8.0]);
-        Action::CaptionScale.change(&mut cfg, 1);
-        assert!((cfg.vanilla.get(VanillaId::Subtitle).scale - 1.05).abs() < 0.001);
-        Action::CaptionOn.change(&mut cfg, 1);
-        assert!(!cfg.vanilla.get(VanillaId::Subtitle).on);
-        Action::CaptionReset.change(&mut cfg, 1);
-        assert_eq!(cfg.vanilla.get(VanillaId::Subtitle), original);
-    }
-
-    #[test]
     fn inventory_cells_follow_the_hotbar_and_columns() {
         let mut s = snapshot();
         s.inventory = (0..36)
@@ -6971,15 +7444,15 @@ mod tests {
     }
 
     #[test]
-    fn settings_are_split_into_one_page_per_module() {
+    fn settings_are_split_into_one_card_per_module() {
         let cfg = Config::default();
         for tab in SettingsTab::ALL {
             let lines = setting_lines(&cfg, tab);
             assert!(!lines.is_empty(), "{tab:?} has no rows");
             assert!(lines.iter().all(|l| l.action.is_some()));
         }
-        // Every section in the model has exactly one rail tab, and no tab is
-        // empty: the old one long list is now spread over the rail.
+        // Every section in the model has exactly one card, and no card is
+        // empty: the old one long list is now spread over the modules.
         let mut sections: Vec<_> = setting_rows().into_iter().map(|(_, _, s)| s).collect();
         sections.sort_unstable();
         sections.dedup();
@@ -6987,77 +7460,180 @@ mod tests {
         tabs.sort_unstable();
         tabs.dedup();
         assert_eq!(sections, tabs);
-        // Each module keeps its common rows on its own page, beside its
+        // Each module keeps its common rows on its own card, beside its
         // module-specific options.
         for id in ModuleId::ALL {
-            let tab = SettingsTab::ALL
-                .iter()
-                .copied()
-                .find(|t| t.section() == id.title())
-                .unwrap_or_else(|| panic!("no tab for {}", id.title()));
+            let tab = SettingsTab::of_module(id);
+            assert_eq!(tab.module(), Some(id));
             let lines = setting_lines(&cfg, tab);
             assert!(lines.iter().any(|l| l.text == "Enabled"));
             assert!(lines.iter().any(|l| l.text == "Anchor"));
             assert!(lines.len() > 2, "{} has no options of its own", id.title());
         }
-        let captions = setting_lines(&cfg, SettingsTab::Captions);
-        assert!(captions.iter().any(|l| l.text == "Horizontal offset"));
-        assert!(captions.iter().any(|l| l.text == "Vertical offset"));
-        assert!(captions.iter().any(|l| l.text == "Scale"));
-        assert!(
-            setting_lines(&cfg, SettingsTab::General)
-                .iter()
-                .any(|l| l.text == "Empty modules")
-        );
-        let view = settings_view((320.0, 200.0), 12, 0);
+        // There is no orphan page: tooltips and the vanilla HUD live in
+        // General, and captions are the subtitle widget in the Vanilla page.
+        let general = setting_lines(&cfg, SettingsTab::General);
+        for label in [
+            "Empty modules",
+            "Move vanilla HUD",
+            "Food values in tooltips",
+            "Sneak details in tooltips",
+            "Edit vanilla HUD",
+        ] {
+            assert!(
+                general.iter().any(|l| l.text == label),
+                "General lost {label}"
+            );
+        }
+        assert!(!general.iter().any(|l| l.text.contains("captions")));
+        let view = card_view((320.0, 200.0), SettingsTab::General, 12, 0);
         assert!(view.visible > 0);
         assert_eq!(view.first, 0);
-        assert!(view.panel.right() <= 320.0);
-        assert!(view.panel.w < 320.0);
-        assert!(view.rail.w > 0.0 && view.list.w > 0.0);
+        assert!(view.card.right() <= 320.0);
+        assert!(view.card.w < 320.0);
+        assert!(view.list.w > 0.0);
     }
 
     #[test]
-    fn settings_row_hit_test_follows_the_drawn_row() {
+    fn every_module_has_a_card_and_general_is_first() {
+        assert_eq!(SettingsTab::ALL[0], SettingsTab::General);
+        for id in ModuleId::ALL {
+            assert_eq!(SettingsTab::of_module(id).module(), Some(id));
+        }
+        assert!(SettingsTab::General.module().is_none());
+        assert_eq!(SettingsTab::Armor.module(), Some(ModuleId::Armor));
+        // No page exists without a module or a home on the canvas.
+        assert_eq!(SettingsTab::ALL.len(), ModuleId::ALL.len() + 1);
+    }
+
+    #[test]
+    fn settings_rows_draw_as_the_right_control() {
+        let cfg = Config::default();
+        for tab in SettingsTab::ALL {
+            for line in setting_lines(&cfg, tab) {
+                let action = line.action.unwrap();
+                assert_eq!(line.kind, action.kind(), "{}", line.text);
+                assert!(!line.hint().is_empty(), "{} has no hint", line.text);
+                if line.kind == RowKind::Toggle {
+                    assert!(
+                        line.value == "ON" || line.value == "OFF",
+                        "{}: {}",
+                        line.text,
+                        line.value
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resetting_one_row_restores_its_default() {
+        let mut cfg = Config::default();
+        Action::Toggle(Flag::TextShadow).change(&mut cfg, 1);
+        Action::Toggle(Flag::TextShadow).reset(&mut cfg);
+        assert_eq!(cfg.text_shadow, Config::default().text_shadow);
+
+        Action::Amount(Num::Opacity).change(&mut cfg, 1);
+        Action::Amount(Num::Opacity).reset(&mut cfg);
+        assert_eq!(cfg.opacity, Config::default().opacity);
+
+        Action::Choice(Pick::Theme).change(&mut cfg, 1);
+        Action::Choice(Pick::Theme).reset(&mut cfg);
+        assert_eq!(cfg.theme, Config::default().theme);
+
+        let scale = Action::Module(ModuleId::Coords, ModField::Scale);
+        scale.change(&mut cfg, 1);
+        scale.reset(&mut cfg);
+        assert_eq!(
+            cfg.module(ModuleId::Coords).scale,
+            Config::default().module(ModuleId::Coords).scale
+        );
+    }
+
+    #[test]
+    fn every_card_draws_on_screen() {
+        set_rects(Vec::new());
+        let cfg = Config::default();
+        for tab in SettingsTab::ALL {
+            let mut p = MockPainter;
+            draw_card(&mut p, &cfg, tab, 0, 0, [0.0, 0.0]);
+            draw_card(&mut p, &cfg, tab, 40, 3, [500.0, 100.0]);
+        }
+        // The card fits a small window, and its rows stay inside it.
+        for screen in [(320.0, 200.0), (640.0, 360.0), (1280.0, 720.0)] {
+            for tab in SettingsTab::ALL {
+                let lines = setting_lines(&cfg, tab).len();
+                let view = card_view(screen, tab, lines, 0);
+                assert!(view.card.x >= 0.0 && view.card.right() <= screen.0);
+                assert!(view.card.bottom() <= screen.1);
+                assert!(view.list.right() <= view.card.right());
+                assert!(card_close_rect(&view).right() <= view.card.right());
+                assert!(view.visible > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn the_card_opens_beside_its_module() {
+        let screen = (640.0, 360.0);
+        let id = ModuleId::Coords;
+        let module = Rect::new(200.0, 120.0, 120.0, 30.0);
+        set_rects(vec![(id, module)]);
+        let view = card_view(screen, SettingsTab::of_module(id), 6, 0);
+        // Right of the module when there is room.
+        assert!(view.card.x >= module.right());
+        assert!((view.card.y - module.y).abs() < 0.001);
+        // A module hugging the right edge puts the card on its left.
+        let module = Rect::new(500.0, 40.0, 130.0, 30.0);
+        set_rects(vec![(id, module)]);
+        let view = card_view(screen, SettingsTab::of_module(id), 6, 0);
+        assert!(view.card.right() <= module.x);
+        // General is always at the top-left, whatever is selected.
+        set_rects(vec![(id, module)]);
+        let view = card_view(screen, SettingsTab::General, 6, 0);
+        assert_eq!((view.card.x, view.card.y), (CARD_MARGIN, CARD_TOP));
+        set_rects(Vec::new());
+    }
+
+    #[test]
+    fn only_resets_are_dangerous() {
+        assert!(Action::ResetLayout.is_dangerous());
+        assert!(Action::ResetAll.is_dangerous());
+        assert!(!Action::OpenVanilla.is_dangerous());
+        assert!(!Action::CloseScreen.is_dangerous());
+        assert!(!Action::Toggle(Flag::Enabled).is_dangerous());
+    }
+
+    #[test]
+    fn card_row_hit_test_follows_the_drawn_row() {
+        set_rects(Vec::new());
         let cfg = Config::default();
         let lines = setting_lines(&cfg, SettingsTab::General);
         let screen = (640.0, 360.0);
         let scroll = 2;
-        let view = settings_view(screen, lines.len(), scroll);
+        let view = card_view(screen, SettingsTab::General, lines.len(), scroll);
         for row in 0..view.visible.min(lines.len()) {
             let at = [
                 view.list.x + view.list.w / 2.0,
                 view.list.y + (row as f32 + 0.5) * view.row_h,
             ];
             assert_eq!(
-                settings_row_at(&view, at),
+                card_row_at(&view, at),
                 Some(view.first + row),
                 "row {row} maps below itself"
             );
         }
-        // The title and the footer are not rows.
+        // The header and the footer are not rows.
         assert_eq!(
-            settings_row_at(&view, [view.list.x + 4.0, view.panel.y + 4.0]),
+            card_row_at(&view, [view.list.x + 4.0, view.card.y + 4.0]),
             None
         );
         assert_eq!(
-            settings_row_at(&view, [view.list.x + 4.0, view.panel.bottom() - 4.0]),
-            None
-        );
-        // Every rail tab maps to itself, and the rail's title is not a tab.
-        for (i, tab) in SettingsTab::ALL.iter().enumerate() {
-            let at = [
-                view.rail.x + view.rail.w / 2.0,
-                view.rail.y + (i as f32 + 0.5) * view.tab_h,
-            ];
-            assert_eq!(settings_tab_at(screen, at), Some(*tab));
-        }
-        assert_eq!(
-            settings_tab_at(screen, [view.rail.x + 4.0, view.panel.y + 4.0]),
+            card_row_at(&view, [view.list.x + 4.0, view.card.bottom() - 4.0]),
             None
         );
         assert_eq!(
-            settings_view(screen, lines.len(), 0).first,
+            card_view(screen, SettingsTab::General, lines.len(), 0).first,
             0,
             "first row is visible without scrolling"
         );

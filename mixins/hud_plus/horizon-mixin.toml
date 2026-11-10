@@ -1,6 +1,6 @@
 [mod]
 id = "hud_plus"
-version = "5"
+version = "6"
 priority = 100
 
 # The Nightly this build targets: it already contains the focus fix (#7455)

@@ -1,13 +1,14 @@
-"""HUD+ 5 in a running modded game: its row and buttons in Options > Mods, the
+"""HUD+ 6 in a running modded game: its row and buttons in Options > Mods, the
 config file they write, the HUD drawn in the corners and turned off by the
-command, the settings rail and its module and caption pages, the empty-module
-modes, dragging the subtitles, the vanilla list hit test and the layout editor
-opening as the mod's own screen."""
+command, the one editor screen with its General and module options cards, the
+empty-module modes, dragging the subtitles, the vanilla list hit test and the
+editor opening as the mod's own screen."""
 import json
 import time
 from game import Game, difference
 
 CONFIG = "config/hud_plus.json"
+VERSION = "6"
 TOP_LEFT, BOTTOM_CENTER = (0.0, 0.0, 0.3, 0.15), (0.3, 0.78, 0.7, 0.92)
 # 1280x720 at GUI scale 2: the vanilla list starts at (4, 22 + 14) and each row
 # is 13 GUI pixels tall.
@@ -15,12 +16,22 @@ VANILLA_ROW_X, VANILLA_ROW0_Y, VANILLA_ROW_H = 80, 36, 13
 VANILLA_ROWS = ["Crosshair", "Hotbar", "Effect icons", "Boss bars", "XP / locator bar",
                 "Health & hunger", "Item name", "Mount health", "Action bar", "Title",
                 "Subtitles", "Scoreboard", "Chat", "Player list"]
-# The settings panel is 640 GUI pixels wide at this scale; its rail starts at
-# x=305 and the rows at x=402. The rows are 13 GUI pixels tall.
-SETTINGS_ROW_X, SETTINGS_ROW0_Y, SETTINGS_ROW_H = 500, 24, 13
-SETTINGS_TAB_X, SETTINGS_TAB0_Y, SETTINGS_TAB_H = 350, 24, 16
-SETTINGS_TABS = ["General", "AppleSkin", "Effects", "Inventory", "Armour", "Captions",
-                 "Coordinates", "Keys", "Info", "Health", "Held", "Vanilla HUD", "Tooltips"]
+# The General card sits at the top-left: 232 GUI pixels wide, 20-pixel header,
+# then 20-pixel rows. At GUI scale 2 the window is 640x360 GUI pixels.
+CARD_X, CARD_Y, CARD_HEADER, CARD_ROW_H = 6, 24, 20, 20
+GENERAL_ROW_X = 120
+# General rows, 0-based, in drawing order.
+GENERAL_ROWS = ["HUD enabled", "Profile", "Theme", "Opacity", "Text shadow",
+                "Snap to grid", "Grid", "Layout hotkey", "Settings hotkey",
+                "Show hints", "Empty modules", "Move vanilla HUD",
+                "Food values in tooltips", "Sneak details in tooltips",
+                "Edit vanilla HUD", "Reset layout", "Reset everything", "Close editor"]
+MODULE_KEYS = ["apple_skin", "effects", "inventory", "armor", "coords", "keys",
+               "info", "health", "held"]
+
+
+def general_row(index):
+    return GENERAL_ROW_X, CARD_Y + CARD_HEADER + (index + 0.5) * CARD_ROW_H
 
 
 def cfg_now(g):
@@ -31,7 +42,7 @@ def run(ctl, resources, out):
     with Game(ctl, resources, out, {"options.txt": "guiScale:2\n"}) as g:
         results = {}
         g.run("options", "mods")
-        assert "HUD+ 5: ON" in g.labels(), g.labels()
+        assert f"HUD+ {VERSION}: ON" in g.labels(), g.labels()
         g.run("click", g.ids()["Settings"])
         page = g.labels()
         assert page[:4] == ["HUD: on", "Theme: Dark", "Profile: Default", "Reset layout"], page
@@ -63,67 +74,66 @@ def run(ctl, resources, out):
         assert cfg["theme"] == "neon", results
         g.run("chat", "/hudplus theme dark")
 
-        # The settings screen is one panel on the right, with a rail of pages:
-        # the world to its left keeps its brightness, and a click changes the
-        # row under the pointer.
-        before = g.shot("5-before-settings")
+        # The editor is one screen. N opens it with the General card at the
+        # top-left; there is no separate settings screen any more.
+        before = g.shot("5-before-editor")
         g.run("key", "n", "tap")
         time.sleep(1)
-        settings = g.shot("6-settings")
-        results["settings_screen"] = g.run("status").get("screen")
-        results["diff_outside_settings"] = round(difference(before, settings, (0.0, 0.0, 0.45, 1.0)), 1)
-        assert results["settings_screen"] == "mod", results
-        assert results["diff_outside_settings"] < 4, results
+        card = g.shot("6-general-card")
+        results["editor_screen"] = g.run("status").get("screen")
+        assert results["editor_screen"] == "mod", results
+        # The card is painted over the dimmed world: the left column changes
+        # while the game stays behind it.
+        results["diff_general_card"] = round(difference(before, card, (0.0, 0.0, 0.4, 1.0)), 1)
+        assert results["diff_general_card"] > 4, results
 
-        # Captions have their own page: horizontal, vertical and scale act on
-        # the subtitle box directly, without needing a sound to be playing.
-        cap = SETTINGS_TABS.index("Captions")
-        g.run("click-at", SETTINGS_TAB_X, SETTINGS_TAB0_Y + (cap + 0.5) * SETTINGS_TAB_H)
-        time.sleep(0.4)
-        for row in (1, 2, 3):
-            g.run("click-at", SETTINGS_ROW_X, SETTINGS_ROW0_Y + (row + 0.5) * SETTINGS_ROW_H)
-            time.sleep(0.15)
-        time.sleep(0.5)
-        cfg = cfg_now(g)
-        subtitle = cfg["vanilla"]["elements"]["subtitle"]
-        results["caption_settings"] = subtitle
-        assert subtitle["x"] == 8 and subtitle["y"] == 8, subtitle
-        assert abs(subtitle["scale"] - 1.05) < 0.001, subtitle
-        g.shot("6b-captions")
-        # Reset captions puts it back where the game draws it.
-        g.run("click-at", SETTINGS_ROW_X, SETTINGS_ROW0_Y + 4.5 * SETTINGS_ROW_H)
-        time.sleep(0.5)
-        subtitle = cfg_now(g)["vanilla"]["elements"]["subtitle"]
-        assert subtitle["x"] == 0 and subtitle["y"] == 0, subtitle
-        assert abs(subtitle["scale"] - 1.0) < 0.001, subtitle
-
-        # Back on General: the empty-module mode is a real two-state choice,
-        # and the Theme row under the pointer is still the one that changes.
-        general = SETTINGS_TABS.index("General")
-        g.run("click-at", SETTINGS_TAB_X, SETTINGS_TAB0_Y + (general + 0.5) * SETTINGS_TAB_H)
-        time.sleep(0.4)
-        empty_row = 10
-        g.run("click-at", SETTINGS_ROW_X, SETTINGS_ROW0_Y + (empty_row + 0.5) * SETTINGS_ROW_H)
+        # General rows are real controls: Empty modules flips between the two
+        # modes, and the Theme row under the pointer still changes the theme.
+        empty_row = GENERAL_ROWS.index("Empty modules")
+        g.run("click-at", *general_row(empty_row))
         time.sleep(0.5)
         cfg = cfg_now(g)
         results["empty_mode_full"] = cfg["empty_mode"]
         assert cfg["empty_mode"] == "always_full", cfg
-        g.shot("6c-always-full")
-        g.run("click-at", SETTINGS_ROW_X, SETTINGS_ROW0_Y + (empty_row + 0.5) * SETTINGS_ROW_H)
+        g.shot("6b-always-full")
+        g.run("click-at", *general_row(empty_row))
         time.sleep(0.5)
         cfg = cfg_now(g)
         results["empty_mode_compact"] = cfg["empty_mode"]
         assert cfg["empty_mode"] == "compact", cfg
-        g.run("click-at", SETTINGS_ROW_X, SETTINGS_ROW0_Y + 2.5 * SETTINGS_ROW_H)
+        g.run("click-at", *general_row(GENERAL_ROWS.index("Theme")))
         time.sleep(0.5)
         cfg = cfg_now(g)
         results["theme_after_row_click"] = cfg["theme"]
         assert cfg["theme"] != "dark", results
-        g.run("scroll-at", SETTINGS_ROW_X, 200, -8)
+        # The wheel scrolls the card's rows without leaving the editor.
+        g.run("scroll-at", GENERAL_ROW_X, 200, -8)
         time.sleep(0.5)
         assert g.run("status").get("screen") == "mod", results
+
+        # Enter opens the selected module's own card. Its rows start at
+        # Enabled, View, Anchor: Down twice then Right cycles the anchor.
         g.run("key", "esc", "tap")
-        time.sleep(1)
+        time.sleep(0.4)
+        cfg = cfg_now(g)
+        module = next(k for k in MODULE_KEYS if cfg[k]["module"]["enabled"])
+        anchor_before = cfg[module]["module"]["anchor"]
+        g.run("key", "enter", "tap")
+        time.sleep(0.5)
+        g.run("key", "down", "tap")
+        g.run("key", "down", "tap")
+        g.run("key", "right", "tap")
+        time.sleep(0.5)
+        cfg = cfg_now(g)
+        results["module_card"] = module
+        results["module_anchor"] = cfg[module]["module"]["anchor"]
+        assert cfg[module]["module"]["anchor"] != anchor_before, (anchor_before, cfg[module])
+        g.shot("6c-module-card")
+        # Esc leaves the card first, then the editor.
+        g.run("key", "esc", "tap")
+        time.sleep(0.4)
+        g.run("key", "esc", "tap")
+        time.sleep(0.8)
         g.run("chat", "/hudplus theme dark")
 
         # The vanilla list row under the pointer is the one selected: the
@@ -184,5 +194,5 @@ def run(ctl, resources, out):
         time.sleep(1)
         results["screen_after_escape"] = g.run("status").get("screen")
         assert results["screen_after_escape"] == "playing", results
-        print(json.dumps({"proof": "hud_plus", "ok": True, "settings": bool(settings),
+        print(json.dumps({"proof": "hud_plus", "ok": True, "card": bool(card),
                           "subtitle_row": bool(sub_row is not None), **results}, indent=2))

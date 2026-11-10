@@ -1,4 +1,4 @@
-# HUD+ 5
+# HUD+ 6
 
 HUD+ is a native Horizon HUD mod: one bundle that replaces a pile of separate
 HUD mods and adds a drag-and-drop layout editor. Everything is configurable in
@@ -70,36 +70,40 @@ contrast, Amber) set everything at once.
 
 ## Using it
 
-- `H` opens the layout editor on the HUD+ page: drag a module to move it, use
-  the wheel over it to scale it, right-click to show or hide it, middle-click
-  to cycle its anchor, the arrow keys to nudge it, `Space` to toggle it and
-  `R` to reset the layout. `Tab` turns the page to `Vanilla`, another `Tab`
-  opens settings; `Esc` closes.
-- `V` (or Settings > Vanilla HUD > Edit vanilla layout) opens the same editor
-  on the `Vanilla` page. Every layer of Minecraft's HUD is listed on the left
-  and boxed on screen: drag a box or a row to move that widget, wheel over it
-  to scale it around its pivot, right-click to put it back to vanilla, middle-
-  click to reset it, `Space` to switch its control on or off and `R` to reset
-  every widget. The real HUD stays visible while you edit, so what you see is
-  what the game draws.
-- `N` opens settings as one compact panel on the right; the world stays
-  visible while it is open. A rail down the left side gives every module and
-  HUD area its own page — General, AppleSkin, Effects, Inventory, Armour,
-  Captions, Coordinates, Keys, Info, Health, Held, Vanilla HUD and Tooltips —
-  so options are spread out instead of forming one long wall of text. Click a
-  rail entry to switch pages; each page holds only that module's rows, plus
-  `Enabled`, `View`, `Anchor`, `Scale`, `Background` and `Border` on the module
-  pages. Click a row to change it, right-click to go back, wheel to scroll,
-  `Esc` to close. The first row of General is the master switch, so the whole
-  HUD can be turned off without leaving the world.
-- The **Captions** page is where subtitles are moved: `Move captions`,
-  `Horizontal offset`, `Vertical offset` and `Scale` act on the subtitle box
-  directly, `Reset captions` puts it back on the vanilla bottom line, and
-  `Edit on the vanilla page` opens the same element in the box editor.
-  Dragging the *Subtitles* box or row on the Vanilla page works too.
+- `H` opens the editor on the HUD+ page: drag a module to move it, use the
+  wheel over it to scale it, right-click to show or hide it, middle-click to
+  cycle its anchor, the arrow keys to nudge it, `Space` to toggle it and `R` to
+  reset the layout. The top bar has `HUD+`, `Vanilla` and `General` buttons;
+  `Tab` walks the two pages, and `Esc` closes.
+- `V` opens the same editor on the `Vanilla` page. Every layer of Minecraft's
+  HUD is listed on the left and boxed on screen: drag a box or a row to move
+  that widget, wheel over it to scale it around its pivot, right-click to put
+  it back to vanilla, middle-click to reset it, `Space` to switch its control
+  on or off and `R` to reset every widget. The real HUD stays visible while you
+  edit, so what you see is what the game draws.
+- There is no separate settings screen. Select a module and press `Enter`, or
+  click the `Options` chip on it, and its options open in a small card beside
+  the module. The card holds only that module's rows, plus `Enabled`, `View`,
+  `Anchor`, `Scale`, `Background` and `Border`. Click outside the card (or
+  press `Esc`/`Tab`) to close it without leaving the editor.
+- `N` (or the `General` button) opens the General card at the top-left. It
+  holds everything shared by the whole HUD: the master switch, profile, theme,
+  opacity, text shadow, snap and grid, the layout and General hotkeys, hints,
+  the *Empty modules* choice, *Move vanilla HUD*, the two tooltip switches,
+  *Edit vanilla HUD*, the layout reset and *Reset everything*.
+- Every row is a real control, not a line that happens to react. Switches show
+  `ON`/`OFF` with a pill; numbers and choices show `< value >` arrows; buttons
+  such as *Edit vanilla HUD* end with `>`. Click the arrows (or the row) to
+  change a value, right-click a row to step it back, and `R` resets the focused
+  row to its default. `Up`/`Down` move the focus, `Left`/`Right` change it,
+  `Enter`/`Space` press it, `Page Up`/`Page Down` move a page at a time, and
+  the footer explains the highlighted row. *Reset layout* and *Reset
+  everything* ask for a second click before they wipe anything.
+- Subtitles are moved on the `Vanilla` page: select *Subtitles* in the list or
+  click its box, then drag it, wheel to scale it, or use the arrow keys. `R`
+  puts the whole vanilla HUD back.
 - General also has the **Empty modules** choice (`Always full` or `Compact`,
-  see above), the layout/settings hotkeys, the layout reset and the two editor
-  shortcuts. Vanilla HUD turns the widget control on or off.
+  see above) and turns the vanilla widget control on or off.
 - `/hudplus` shows the command help. `/hudplus on|off`, `layout`, `settings`,
   `reset`, `profile <name>` and `theme <name>` also work.
 - Options > Mods lists HUD+ and has buttons for on/off, theme, profile and a

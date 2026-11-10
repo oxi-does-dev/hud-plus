@@ -70,6 +70,10 @@ pub(super) fn open(game: &mut Game<'_>, mode: m::ScreenMode) -> bool {
         e.selected = selected;
         e.drag = None;
         e.scroll = 0;
+        e.settings_open = false;
+        e.card_scroll = 0;
+        e.settings_row = 0;
+        e.settings_confirm = None;
     });
     true
 }
@@ -96,7 +100,11 @@ pub(super) fn apply_pending(game: &mut Game<'_>) {
 pub(super) fn sync(game: &Game<'_>) {
     if m::mode() != m::ScreenMode::Closed && game.native_mod_screen() != Some(m::ID) {
         m::set_mode(m::ScreenMode::Closed);
-        m::edit_editor(|e| e.drag = None);
+        m::edit_editor(|e| {
+            e.drag = None;
+            e.settings_open = false;
+            e.settings_confirm = None;
+        });
     }
 }
 
@@ -515,20 +523,30 @@ pub(super) fn draw_screen(
     let editor = m::editor();
     let mut painter = GamePainter { game, batch };
     match mode {
-        m::ScreenMode::Layout => match editor.page {
-            m::EditorPage::Mods => {
-                let (sw, sh) = painter.screen();
-                painter.fill(m::Rect::new(0.0, 0.0, sw, sh), 0x9000_0000);
-                m::draw_modules(&mut painter, &s, &cfg, true);
-                m::draw_editor_tabs(&mut painter, &cfg, m::EditorPage::Mods, screen.mouse);
+        m::ScreenMode::Layout => {
+            match editor.page {
+                m::EditorPage::Mods => {
+                    let (sw, sh) = painter.screen();
+                    painter.fill(m::Rect::new(0.0, 0.0, sw, sh), 0x9000_0000);
+                    m::draw_modules(&mut painter, &s, &cfg, true);
+                    m::draw_editor_tabs(&mut painter, &cfg, m::EditorPage::Mods, screen.mouse);
+                }
+                m::EditorPage::Vanilla => {
+                    m::draw_vanilla_editor(&mut painter, &cfg, editor.scroll, screen.mouse);
+                    m::draw_editor_tabs(&mut painter, &cfg, m::EditorPage::Vanilla, screen.mouse);
+                }
             }
-            m::EditorPage::Vanilla => {
-                m::draw_vanilla_editor(&mut painter, &cfg, editor.scroll, screen.mouse);
-                m::draw_editor_tabs(&mut painter, &cfg, m::EditorPage::Vanilla, screen.mouse);
+            // The options card floats above the page it belongs to.
+            if editor.settings_open {
+                m::draw_card(
+                    &mut painter,
+                    &cfg,
+                    editor.settings_tab,
+                    editor.card_scroll,
+                    editor.settings_row,
+                    screen.mouse,
+                );
             }
-        },
-        m::ScreenMode::Settings => {
-            m::draw_settings(&mut painter, &cfg, editor.settings_tab, editor.scroll, screen.mouse)
         }
         m::ScreenMode::Closed => {}
     }
@@ -554,9 +572,14 @@ pub(super) fn key(game: &mut Game<'_>, key: &str, pressed: bool) -> bool {
     let settings = cfg.settings_hotkey.key();
     if !settings.is_empty() && key == settings {
         m::edit_editor(|e| {
+            e.page = m::EditorPage::Mods;
             e.scroll = 0;
         });
-        return open(game, m::ScreenMode::Settings);
+        let opened = open(game, m::ScreenMode::Layout);
+        if opened {
+            m::open_card(m::SettingsTab::General);
+        }
+        return opened;
     }
     if key == "key.keyboard.v" && cfg.vanilla.enabled {
         let opened = open(game, m::ScreenMode::Layout);
@@ -589,27 +612,6 @@ pub(super) fn screen_press(
             }
             hit
         }
-        m::ScreenMode::Settings => {
-            if button != 0 && button != 1 {
-                return false;
-            }
-            let size = (screen.rect[2], screen.rect[3]);
-            if let Some(tab) = m::settings_tab_at(size, screen.mouse) {
-                m::edit_editor(|e| {
-                    e.settings_tab = tab;
-                    e.scroll = 0;
-                });
-                return true;
-            }
-            let scroll = m::editor().scroll;
-            let tab = m::editor().settings_tab;
-            let cfg = config();
-            let hit = m::settings_click(size, tab, scroll, &cfg, screen.mouse, button);
-            if hit {
-                commit();
-            }
-            hit
-        }
         m::ScreenMode::Closed => false,
     }
 }
@@ -618,12 +620,19 @@ pub(super) fn screen_drag(game: &Game<'_>, screen: &NativeScreenView<'_>) -> boo
     if game.native_mod_screen() != Some(m::ID) || m::mode() != m::ScreenMode::Layout {
         return false;
     }
+    // The card is a mode: a drag that starts on it must not move the world.
+    if m::editor().settings_open {
+        return true;
+    }
     m::editor_drag(screen.mouse)
 }
 
 pub(super) fn screen_release(game: &Game<'_>) -> bool {
     if game.native_mod_screen() != Some(m::ID) || m::mode() != m::ScreenMode::Layout {
         return false;
+    }
+    if m::editor().settings_open {
+        return true;
     }
     m::editor_release();
     commit();
@@ -647,25 +656,13 @@ pub(super) fn screen_scroll(
             }
             changed
         }
-        m::ScreenMode::Settings => {
-            let cfg = config();
-            let scroll = m::settings_scroll(
-                (screen.rect[2], screen.rect[3]),
-                m::editor().settings_tab,
-                m::editor().scroll,
-                steps,
-                &cfg,
-            );
-            m::edit_editor(|e| e.scroll = scroll);
-            true
-        }
         m::ScreenMode::Closed => false,
     }
 }
 
 pub(super) fn screen_key(
     game: &Game<'_>,
-    screen: &NativeScreenView<'_>,
+    _screen: &NativeScreenView<'_>,
     key: &str,
     repeat: bool,
 ) -> bool {
@@ -674,26 +671,28 @@ pub(super) fn screen_key(
     }
     let mode = m::mode();
     if key == "key.keyboard.tab" {
-        let page = m::editor().page;
+        // Tab leaves the card first, then flips between the two pages.
+        if m::editor().settings_open {
+            m::edit_editor(|e| {
+                e.settings_open = false;
+                e.settings_confirm = None;
+            });
+            return true;
+        }
         match mode {
             m::ScreenMode::Layout => {
-                if page == m::EditorPage::Mods {
+                if m::editor().page == m::EditorPage::Mods {
                     m::edit_editor(|e| {
                         e.page = m::EditorPage::Vanilla;
                         e.scroll = 0;
                         e.selected_vanilla = e.selected_vanilla.or(Some(m::VanillaId::Hotbar));
                     });
                 } else {
-                    m::edit_editor(|e| e.scroll = 0);
-                    m::set_mode(m::ScreenMode::Settings);
+                    m::edit_editor(|e| {
+                        e.page = m::EditorPage::Mods;
+                        e.scroll = 0;
+                    });
                 }
-            }
-            m::ScreenMode::Settings => {
-                m::edit_editor(|e| {
-                    e.page = m::EditorPage::Mods;
-                    e.scroll = 0;
-                });
-                m::set_mode(m::ScreenMode::Layout);
             }
             m::ScreenMode::Closed => return false,
         }
@@ -707,33 +706,6 @@ pub(super) fn screen_key(
             }
             hit
         }
-        m::ScreenMode::Settings => match key {
-            "key.keyboard.page.up" | "key.keyboard.up" => {
-                let cfg = config();
-                let scroll = m::settings_scroll(
-                    (screen.rect[2], screen.rect[3]),
-                    m::editor().settings_tab,
-                    m::editor().scroll,
-                    4.0,
-                    &cfg,
-                );
-                m::edit_editor(|e| e.scroll = scroll);
-                true
-            }
-            "key.keyboard.page.down" | "key.keyboard.down" => {
-                let cfg = config();
-                let scroll = m::settings_scroll(
-                    (screen.rect[2], screen.rect[3]),
-                    m::editor().settings_tab,
-                    m::editor().scroll,
-                    -4.0,
-                    &cfg,
-                );
-                m::edit_editor(|e| e.scroll = scroll);
-                true
-            }
-            _ => false,
-        },
         m::ScreenMode::Closed => false,
     }
 }
@@ -981,10 +953,12 @@ pub(super) fn command(game: &mut Game<'_>, command: &str, ran: &mut bool) {
         }
         "settings" => {
             m::edit_editor(|e| {
+                e.page = m::EditorPage::Mods;
                 e.scroll = 0;
             });
-            if open(game, m::ScreenMode::Settings) {
-                game.native_chat("HUD+ settings");
+            if open(game, m::ScreenMode::Layout) {
+                m::open_card(m::SettingsTab::General);
+                game.native_chat("HUD+ general options");
             } else {
                 game.native_chat("HUD+ is not available now");
             }
